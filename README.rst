@@ -9,7 +9,12 @@ Prototype Ethereum Smart Contracts in Python
 Description
 ===========
 
-A longer description of your project goes here...
+Library with base classes to prototype Ethereum Smart Contracts in Python. This includes:
+
+- wadray: classes for fixed number of decimals math implemented with integers.
+- contracts: classes to simulate contracts in Python with features like *rollback* on exception, external
+  methods, views. Also classes for common contracts like ERC20 (tokens), ERC721 (NFTs) and AccessControl.
+- wrappers: classes to wrap ethereum contracts called thru brownie but with a pythonic interface
 
 
 .. _pyscaffold-notes:

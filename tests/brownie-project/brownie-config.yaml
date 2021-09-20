@@ -1,0 +1,10 @@
+compiler:
+  solc:
+    version: 0.8.6
+    optimizer:
+      enabled: true
+      runs: 200
+    dependencies:
+     - OpenZeppelin/openzeppelin-contracts@4.3.2
+    remappings:
+     - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.3.2"
