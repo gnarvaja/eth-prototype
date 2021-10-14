@@ -3,52 +3,59 @@ import pytest
 from m9g.fields import IntField
 from ethproto.wadray import _W, Wad
 from ethproto.contracts import Contract, WadField, external, ERC20Token, RevertError, view, ERC721Token
-from ethproto.wrappers import IERC20, MethodAdapter, AddressBook, IERC721
+
+
+try:
+    # TODO: find a not so ugly way of doing this
+    import brownie
+    brownie_available = True
+    from ethproto import brwrappers
+
+    def initialize_brownie():
+        global brownie_initialized
+        if brownie_initialized:
+            return
+        from brownie.project import main
+        from brownie.network import connect
+        main.load("tests/brownie-project")
+        connect()
+        brownie_initialized = True
+
+    class TestCurrency(brwrappers.IERC20):
+        eth_contract = "TestCurrency"
+        __test__ = False
+
+        def __init__(self, owner="owner", name="Test Currency", symbol="TEST", initial_supply=Wad(0)):
+            initialize_brownie()
+            super().__init__(owner, name, symbol, initial_supply)
+
+        mint = brwrappers.MethodAdapter((("recipient", "address"), ("amount", "amount")))
+        burn = brwrappers.MethodAdapter((("recipient", "address"), ("amount", "amount")))
+
+        @property
+        def balances(self):
+            return dict(
+                (name, self.balance_of(name))
+                for name, address in brwrappers.AddressBook.instance.name_to_address.items()
+            )
+
+    class TestNFT(brwrappers.IERC721):
+        __test__ = False
+
+        eth_contract = "TestNFT"
+
+        def __init__(self, owner="Owner", name="Test NFT", symbol="NFTEST"):
+            initialize_brownie()
+            super().__init__(owner, name, symbol)
+
+        mint = brwrappers.MethodAdapter((("to", "address"), ("token_id", "int")))
+        burn = brwrappers.MethodAdapter((("owner", "msg.sender"), ("token_id", "int")))
+
+except ImportError:
+    brownie_available = False
 
 
 brownie_initialized = False
-
-def initialize_brownie():
-    global brownie_initialized
-    if brownie_initialized:
-        return
-    from brownie.project import main
-    from brownie.network import connect
-    main.load("tests/brownie-project")
-    connect()
-    brownie_initialized = True
-
-
-class TestCurrency(IERC20):
-    eth_contract = "TestCurrency"
-    __test__ = False
-
-    def __init__(self, owner="owner", name="Test Currency", symbol="TEST", initial_supply=Wad(0)):
-        initialize_brownie()
-        super().__init__(owner, name, symbol, initial_supply)
-
-    mint = MethodAdapter((("recipient", "address"), ("amount", "amount")))
-    burn = MethodAdapter((("recipient", "address"), ("amount", "amount")))
-
-    @property
-    def balances(self):
-        return dict(
-            (name, self.balance_of(name))
-            for name, address in AddressBook.instance.name_to_address.items()
-        )
-
-
-class TestNFT(IERC721):
-    __test__ = False
-
-    eth_contract = "TestNFT"
-
-    def __init__(self, owner="Owner", name="Test NFT", symbol="NFTEST"):
-        initialize_brownie()
-        super().__init__(owner, name, symbol)
-
-    mint = MethodAdapter((("to", "address"), ("token_id", "int")))
-    burn = MethodAdapter((("owner", "msg.sender"), ("token_id", "int")))
 
 
 class MyTestContract(Contract):
@@ -114,7 +121,12 @@ class TestReversion(TestCase):
             tcontract.bad_view_two()
 
 
-@pytest.mark.parametrize("token_class", [ERC20Token, TestCurrency])
+ERC20TokenAlternatives = [ERC20Token]
+if brownie_available:
+    ERC20TokenAlternatives.append(TestCurrency)
+
+
+@pytest.mark.parametrize("token_class", ERC20TokenAlternatives)
 class TestERC20Token:
 
     def _validate_total_supply(self, token):
@@ -182,8 +194,12 @@ class TestERC20Token:
         assert token.balance_of("Luca") == _W(0)
 
 
-# @pytest.mark.parametrize("token_class", [ERC721Token, TestNFT])
-@pytest.mark.parametrize("token_class", [ERC721Token])
+ERC721TokenAlternatives = [ERC721Token]
+if brownie_available:
+    ERC721TokenAlternatives.append(TestNFT)
+
+
+@pytest.mark.parametrize("token_class", ERC721TokenAlternatives)
 class TestERC721Token:
 
     def test_mint_burn(self, token_class):
