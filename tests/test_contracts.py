@@ -3,13 +3,19 @@ import pytest
 from m9g.fields import IntField
 from ethproto.wadray import _W, Wad
 from ethproto.contracts import Contract, WadField, external, ERC20Token, RevertError, view, ERC721Token
+from environs import Env
 
+env = Env()
 
-try:
+TEST_ENV = env.list("TEST_ENV", ["pure-python"])
+
+if "eth-brownie" in TEST_ENV:
     # TODO: find a not so ugly way of doing this
     import brownie
     brownie_available = True
     from ethproto import brwrappers
+
+    brownie_initialized = False
 
     def initialize_brownie():
         global brownie_initialized
@@ -51,11 +57,40 @@ try:
         mint = brwrappers.MethodAdapter((("to", "address"), ("token_id", "int")))
         burn = brwrappers.MethodAdapter((("owner", "msg.sender"), ("token_id", "int")))
 
-except ImportError:
-    brownie_available = False
 
+if "web3py" in TEST_ENV:
+    from ethproto import w3wrappers
+    from web3 import Web3
 
-brownie_initialized = False
+    w3wrappers.w3 = Web3(Web3.EthereumTesterProvider())
+
+    class W3TestCurrency(w3wrappers.IERC20):
+        eth_contract = "TestCurrency"
+        __test__ = False
+
+        def __init__(self, owner="owner", name="Test Currency", symbol="TEST", initial_supply=Wad(0)):
+            super().__init__(owner, name, symbol, initial_supply)
+
+        mint = w3wrappers.MethodAdapter((("recipient", "address"), ("amount", "amount")))
+        burn = w3wrappers.MethodAdapter((("recipient", "address"), ("amount", "amount")))
+
+        @property
+        def balances(self):
+            return dict(
+                (name, self.balance_of(name))
+                for name, address in w3wrappers.AddressBook.instance.name_to_address.items()
+            )
+
+    class W3TestNFT(w3wrappers.IERC721):
+        __test__ = False
+
+        eth_contract = "TestNFT"
+
+        def __init__(self, owner="Owner", name="Test NFT", symbol="NFTEST"):
+            super().__init__(owner, name, symbol)
+
+        mint = w3wrappers.MethodAdapter((("to", "address"), ("token_id", "int")))
+        burn = w3wrappers.MethodAdapter((("owner", "msg.sender"), ("token_id", "int")))
 
 
 class MyTestContract(Contract):
@@ -122,8 +157,10 @@ class TestReversion(TestCase):
 
 
 ERC20TokenAlternatives = [ERC20Token]
-if brownie_available:
+if "eth-brownie" in TEST_ENV:
     ERC20TokenAlternatives.append(TestCurrency)
+if "web3py" in TEST_ENV:
+    ERC20TokenAlternatives.append(W3TestCurrency)
 
 
 @pytest.mark.parametrize("token_class", ERC20TokenAlternatives)
@@ -195,8 +232,10 @@ class TestERC20Token:
 
 
 ERC721TokenAlternatives = [ERC721Token]
-if brownie_available:
+if "eth-brownie" in TEST_ENV:
     ERC721TokenAlternatives.append(TestNFT)
+if "web3py" in TEST_ENV:
+    ERC721TokenAlternatives.append(W3TestNFT)
 
 
 @pytest.mark.parametrize("token_class", ERC721TokenAlternatives)
