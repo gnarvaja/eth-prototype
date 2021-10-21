@@ -14,23 +14,32 @@ Library with base classes to prototype Ethereum Smart Contracts in Python. This 
 - wadray: classes for fixed number of decimals math implemented with integers.
 - contracts: classes to simulate contracts in Python with features like *rollback* on exception, external
   methods, views. Also classes for common contracts like ERC20 (tokens), ERC721 (NFTs) and AccessControl.
-- wrappers: classes to wrap ethereum contracts called thru brownie but with a pythonic interface
+- brwrappers: classes to wrap ethereum contracts called thru [brownie](https://github.com/eth-brownie/brownie/) but with a pythonic interface
+- w3wrappers: classes to wrap ethereum contracts called thru [web3py](https://web3py.readthedocs.io/) but with a pythonic interface
 
 
 Tox Tests
 =========
 
-To run the tox tests, you need an environment with Brownie, SOLC and other requirements.
+The tox tests run in three variants:
+
+- `default`: only uses and tests the prototype libraries, no blockchain.
+- `default-w3`: users and tests two variants: prototype and w3wrappers (wrappers using web3py).
+- `default-br`: users and tests two variants: prototype and brwrappers (wrappers using brownie).
+
+It's not possible for now running all the tests together because of incompatibilities between brownie and web3[tester].
+
+
+To run the tox `default-br` tests, you need an environment with Brownie, SOLC and other requirements.
 
 You can do it using a Docker image an a few commands
 
 .. code-block:: bash
 
-   docker run -it -v $PWD:/code gnarvaja/eth-dev:1.0.0 bash
-   cd /code
+   docker run -it -v $PWD:/code -w /code gnarvaja/eth-dev:1.0.0 bash
    pip install tox
    brownie pm install OpenZeppelin/openzeppelin-contracts@4.3.2
-   tox
+   tox -e default-br
 
 
 .. _pyscaffold-notes:
