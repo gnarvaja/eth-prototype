@@ -177,5 +177,5 @@ class W3Provider:
         # TODO: verify receipt OK
         return self.w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
 
-    def build_contract(self, contract_address, contract_factory):
+    def build_contract(self, contract_address, contract_factory, contract_name=None):
         return self.w3.eth.contract(abi=contract_factory.abi, address=contract_address)

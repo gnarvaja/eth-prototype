@@ -133,6 +133,26 @@ class ETHCall(ABC):
         return self.unparse(wrapper, self.eth_return_type, ret_value)
 
     @classmethod
+    def parse_args(cls, wrapper, eth_args, *args, **kwargs):
+        """Used as helper for parsing arguments, for example for constructor"""
+        call_args = []
+        msg_args = {}
+        for i, (arg_name, arg_type) in enumerate(eth_args):
+            if i < len(args):
+                arg_value = args[i]
+            elif arg_name in kwargs:
+                arg_value = kwargs[arg_name]
+            else:
+                raise TypeError(f"missing required argument: '{arg_name}'")
+            if arg_type == "msg.sender":
+                msg_args["from"] = cls.parse(wrapper, "address", arg_value)
+            elif arg_type == "msg.value":
+                msg_args["value"] = cls.parse(wrapper, "amount", arg_value)
+            else:
+                call_args.append(cls.parse(wrapper, arg_type, arg_value))
+        return call_args, msg_args
+
+    @classmethod
     def _parse_keccak256(cls, value):
         if value.startswith("0x"):
             return value
@@ -154,9 +174,16 @@ class ETHCall(ABC):
 class ETHWrapper:
     proxy_kind = None
     libraries_required = []
+    constructor_args = None
 
     def __init__(self, owner="owner", *init_params, **kwargs):
         self.provider_key = kwargs.get("provider_key", None)
+        if self.constructor_args is not None:
+            init_params, transaction_kwargs = self.eth_call.parse_args(
+                self, self.constructor_args, *init_params, **kwargs
+            )
+            if transaction_kwargs:
+                kwargs.update(transaction_kwargs)
         self.provider.init_eth_wrapper(self, owner, init_params, kwargs)
         self._auto_from = self.owner
 
@@ -174,7 +201,7 @@ class ETHWrapper:
         provider = get_provider(provider_key)
         if isinstance(contract, str):  # It's an address
             contract_factory = provider.get_contract_factory(cls.eth_contract)
-            contract = provider.build_contract(contract, contract_factory)
+            contract = provider.build_contract(contract, contract_factory, cls.eth_contract)
         return cls.build_from_contract(contract, owner, provider_key)
 
     @classmethod

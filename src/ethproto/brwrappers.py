@@ -149,5 +149,5 @@ class BrownieProvider:
             eth_wrapper.contract = eth_contract.deploy({"from": eth_wrapper.owner})
             eth_wrapper.contract.initialize(*init_params, {"from": eth_wrapper.owner})
 
-    def build_contract(self, contract_address, contract_factory):
-        return Contract.from_abi(contract_factory.name, contract_address, contract_factory.abi)
+    def build_contract(self, contract_address, contract_factory, contract_name=None):
+        return Contract.from_abi(contract_name or "Contract", contract_address, contract_factory.abi)

@@ -33,6 +33,8 @@ class TestCurrency(wrappers.IERC20):
     eth_contract = "TestCurrency"
     __test__ = False
 
+    constructor_args = (("name", "string"), ("symbol", "string"), ("initial_supply", "amount"))
+
     def __init__(self, owner="owner", name="Test Currency", symbol="TEST", initial_supply=Wad(0), **kwargs):
         super().__init__(owner, name, symbol, initial_supply, **kwargs)
 
