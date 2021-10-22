@@ -1,56 +1,31 @@
 import os
 import json
-from contextlib import contextmanager
 from .contracts import RevertError
-from ._wrappers import MethodAdapter, IERC20Mixin, IERC721Mixin, ETHCall, AddressBook, MAXUINT256
+from .wrappers import ETHCall, AddressBook, MAXUINT256, ETHWrapper, SKIP_PROXY
 from environs import Env
-import eth_utils
 from eth_account.account import Account, LocalAccount
-
-w3 = None  # Must be initialized from outside
 
 env = Env()
 
 CONTRACT_JSON_PATH = env.list("CONTRACT_JSON_PATH", [], delimiter=":")
-SKIP_PROXY = os.getenv("SKIP_PROXY", "F") in ("T", "1")
-contract_def_cache = {}
 
 
-class TimeControl:
+class W3TimeControl:
+    def __init__(self, w3):
+        self.w3 = w3
+
     def fast_forward(self, secs):
-        w3.provider.make_request("evm_increaseTime", [secs])
+        self.w3.provider.make_request("evm_increaseTime", [secs])
         # Not tested!
 
     @property
     def now(self):
-        return w3.get_block("latest").timestamp
-
-
-time_control = TimeControl()
-
-
-def get_contract_def(eth_contract):
-    global contract_def_cache
-
-    if eth_contract not in contract_def_cache:
-        json_file = None
-        for contract_path in CONTRACT_JSON_PATH:
-            if os.path.exists(os.path.join(contract_path, f"{eth_contract}.json")):
-                json_file = os.path.join(contract_path, f"{eth_contract}.json")
-                break
-        else:
-            raise RuntimeError(f"{eth_contract} JSON definition not found in {CONTRACT_JSON_PATH}")
-        contract_def_cache[eth_contract] = json.load(open(json_file))
-    return contract_def_cache[eth_contract]
-
-
-def get_contract_factory(eth_contract):
-    contract_def = get_contract_def(eth_contract)
-    return w3.eth.contract(abi=contract_def["abi"], bytecode=contract_def.get("bytecode", None))
+        return self.w3.get_block("latest").timestamp
 
 
 class W3AddressBook(AddressBook):
-    def __init__(self, eth_accounts=None):
+    def __init__(self, w3, eth_accounts=None):
+        self.w3 = w3
         self._eth_accounts = eth_accounts
         self.name_to_address = {}
         self.last_account_used = -1
@@ -58,7 +33,7 @@ class W3AddressBook(AddressBook):
     @property
     def eth_accounts(self):
         if self._eth_accounts is None:
-            self._eth_accounts = w3.eth.accounts
+            self._eth_accounts = self.w3.eth.accounts
         return self._eth_accounts
 
     def get_account(self, name):
@@ -75,7 +50,7 @@ class W3AddressBook(AddressBook):
             try:
                 self.name_to_address[name] = self.eth_accounts[self.last_account_used]
             except IndexError:
-                self.name_to_address[name] = w3.eth.account.create().address
+                self.name_to_address[name] = self.w3.eth.account.create().address
         return self.name_to_address[name]
 
     def get_name(self, account_or_address):
@@ -86,9 +61,6 @@ class W3AddressBook(AddressBook):
             if addr == account_or_address:
                 return name
         return None
-
-
-AddressBook.set_instance(W3AddressBook())
 
 
 class W3ETHCall(ETHCall):
@@ -118,7 +90,7 @@ class W3ETHCall(ETHCall):
                     tx_hash = function(*args).transact(transact_args)
                 else:
                     tx_hash = function(*args).transact()
-                return w3.eth.wait_for_transaction_receipt(tx_hash)
+                return wrapper.provider.w3.eth.wait_for_transaction_receipt(tx_hash)
 
         return eth_function
 
@@ -128,7 +100,7 @@ class W3ETHCall(ETHCall):
         super()._handle_exception(err)
 
     @classmethod
-    def parse(cls, value_type, value):
+    def parse(cls, wrapper, value_type, value):
         if value_type == "address":
             if isinstance(value, (LocalAccount, Account)):
                 return value
@@ -138,7 +110,7 @@ class W3ETHCall(ETHCall):
                 return value.contract.address
             elif isinstance(value, str) and value.startswith("0x"):
                 return value
-            return AddressBook.instance.get_account(value)
+            return wrapper.provider.address_book.get_account(value)
         if value_type == "keccak256":
             return cls._parse_keccak256(value)
         if value_type == "contract":
@@ -152,96 +124,58 @@ class W3ETHCall(ETHCall):
         return value
 
 
-def encode_function_data(initializer=None, *args):
-    """Encodes the function call so we can work with an initializer.
-    Args:
-        initializer ([brownie.network.contract.ContractTx], optional):
-        The initializer function we want to call. Example: `box.store`.
-        Defaults to None.
-        args (Any, optional):
-        The arguments to pass to the initializer function
-    Returns:
-        [bytes]: Return the encoded bytes.
-    """
-    if len(args) == 0 or not initializer:
-        return eth_utils.to_bytes(hexstr="0x")
-    else:
-        return initializer.encode_input(*args)
-
-
-class ETHWrapper:
-    proxy_kind = None
-    libraries_required = []
+class W3Provider:
     eth_call = W3ETHCall
 
-    def __init__(self, owner="owner", *init_params):
-        self.owner = AddressBook.instance.get_account(owner)
-        for library in self.libraries_required:
-            get_contract_factory(library).deploy({"from": self.owner})
-        eth_contract = get_contract_factory(self.eth_contract)
-        if self.proxy_kind is None:
-            self.contract = self.construct(eth_contract, init_params, {"from": self.owner})
-        elif self.proxy_kind == "uups" and not SKIP_PROXY:
-            real_contract = self.construct(eth_contract, init_params, {"from": self.owner})
-            ERC1967Proxy = get_contract_factory("ERC1967Proxy")
+    def __init__(self, w3, address_book=None, contracts_path=None):
+        self.w3 = w3
+        self.contracts_path = contracts_path or CONTRACT_JSON_PATH
+        self.contract_def_cache = {}
+        self.address_book = address_book or W3AddressBook(w3)
+
+    def get_contract_def(self, eth_contract):
+        if eth_contract not in self.contract_def_cache:
+            json_file = None
+            for contract_path in self.contracts_path:
+                if os.path.exists(os.path.join(contract_path, f"{eth_contract}.json")):
+                    json_file = os.path.join(contract_path, f"{eth_contract}.json")
+                    break
+            else:
+                raise RuntimeError(f"{eth_contract} JSON definition not found in {self.contracts_path}")
+            self.contract_def_cache[eth_contract] = json.load(open(json_file))
+        return self.contract_def_cache[eth_contract]
+
+    def get_contract_factory(self, eth_contract):
+        contract_def = self.get_contract_def(eth_contract)
+        return self.w3.eth.contract(abi=contract_def["abi"], bytecode=contract_def.get("bytecode", None))
+
+    def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
+        eth_wrapper.owner = self.address_book.get_account(owner)
+        assert not eth_wrapper.libraries_required, "Not supported"
+
+        eth_contract = self.get_contract_factory(eth_wrapper.eth_contract)
+        if eth_wrapper.proxy_kind is None:
+            eth_wrapper.contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
+        elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
+            real_contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
+            ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
+            init_data = real_contract.functions.initialize(*init_params).buildTransaction()["data"]
             proxy_contract = self.construct(
                 ERC1967Proxy,
-                (real_contract.address, encode_function_data(real_contract.functions.initialize,
-                                                             *init_params)),
-                {"from": self.owner}
+                (real_contract.address, init_data),
+                {"from": eth_wrapper.owner}
             )
-            self.contract = w3.eth.contract(abi=eth_contract.abi, address=proxy_contract.address)
-        elif self.proxy_kind == "uups" and SKIP_PROXY:
-            self.contract = self.construct(eth_contract, (), {"from": self.owner})
+            eth_wrapper.contract = self.w3.eth.contract(abi=eth_contract.abi, address=proxy_contract.address)
+        elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
+            eth_wrapper.contract = self.construct(eth_contract, (), {"from": eth_wrapper.owner})
             # TODO
-            self.contract.functions.initialize(*init_params, {"from": self.owner})
+            eth_wrapper.contract.functions.initialize(*init_params, {"from": eth_wrapper.owner})
 
-    @staticmethod
-    def construct(contract_factory, constructor_args=(), transact_kwargs={}):
+    def construct(self, contract_factory, constructor_args=(), transact_kwargs={}):
         tx_hash = contract_factory.constructor(*constructor_args).transact(transact_kwargs)
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
         # TODO: verify receipt OK
-        return w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
+        return self.w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
 
-    @classmethod
-    def connect(cls, contract, owner=None):
-        """Connects a wrapper to an existing deployed object"""
-        obj = cls.__new__(cls)
-        if isinstance(contract, str):
-            eth_contract = get_contract_factory(cls.eth_contract)
-            contract = Contract.from_abi(cls.eth_contract, contract, eth_contract.abi)
-        obj.contract = contract
-        obj.owner = owner
-        return obj
-
-    @property
-    def contract_id(self):
-        return self.contract.address
-
-    def _get_account(self, name):
-        return AddressBook.instance.get_account(name)
-
-    def _get_name(self, account):
-        return AddressBook.instance.get_name(account)
-
-    grant_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
-
-    @contextmanager
-    def as_(self, user):
-        prev_auto_from = getattr(self, "_auto_from", "missing")
-        self._auto_from = self._get_account(user)
-        try:
-            yield self
-        finally:
-            if prev_auto_from == "missing":
-                del self._auto_from
-            else:
-                self._auto_from = prev_auto_from
-
-
-class IERC20(IERC20Mixin, ETHWrapper):
-    pass
-
-
-class IERC721(IERC721Mixin, ETHWrapper):
-    pass
+    def build_contract(self, contract_address, contract_factory):
+        return self.w3.eth.contract(abi=contract_factory.abi, address=contract_address)

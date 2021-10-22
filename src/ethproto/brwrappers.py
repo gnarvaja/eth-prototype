@@ -1,45 +1,27 @@
-import os
-from contextlib import contextmanager
 from .contracts import RevertError
-from ._wrappers import MethodAdapter, IERC20Mixin, IERC721Mixin, ETHCall, AddressBook, MAXUINT256
-from brownie import accounts
+from .wrappers import ETHCall, AddressBook, MAXUINT256, SKIP_PROXY, ETHWrapper
 import eth_utils
+from brownie import accounts
 import brownie
 from brownie.network.account import Account, LocalAccount
 from brownie.exceptions import VirtualMachineError
 from brownie.network.state import Chain
 from brownie.network.contract import Contract, ProjectContract
 
-chain = Chain()
 
-SKIP_PROXY = os.getenv("SKIP_PROXY", "F") in ("T", "1")
+class BrownieTimeControl:
+    def __init__(self, chain=None):
+        self.chain = chain or Chain()
 
-
-class TimeControl:
     def fast_forward(self, secs):
-        chain.sleep(secs)
-        chain.mine()
+        self.chain.sleep(secs)
+        self.chain.mine()
 
     @property
     def now(self):
-        if len(chain) > 0:
-            return chain[-1].timestamp
-        return chain.time()
-
-
-time_control = TimeControl()
-
-
-def get_contract_factory(eth_contract):
-    ret = getattr(brownie, eth_contract, None)
-    if ret is not None:
-        return ret
-    # Might be a manually loaded project or an interface
-    project = brownie.project.get_loaded_projects()[0]
-    ret = getattr(project, eth_contract, None)
-    if ret is not None:
-        return ret
-    return getattr(project.interface, eth_contract)
+        if len(self.chain) > 0:
+            return self.chain[-1].timestamp
+        return self.chain.time()
 
 
 class BrownieAddressBook(AddressBook):
@@ -106,7 +88,7 @@ class BrownieETHCall(ETHCall):
             return getattr(wrapper.contract, eth_method)
 
     @classmethod
-    def parse(cls, value_type, value):
+    def parse(cls, wrapper, value_type, value):
         if value_type == "address":
             if isinstance(value, (LocalAccount, Account)):
                 return value
@@ -116,7 +98,7 @@ class BrownieETHCall(ETHCall):
                 return value.contract.address
             elif isinstance(value, str) and value.startswith("0x"):
                 return value
-            return AddressBook.instance.get_account(value)
+            return wrapper.provider.address_book.get_account(value)
         if value_type == "keccak256":
             return cls._parse_keccak256(value)
         if value_type == "contract":
@@ -130,68 +112,42 @@ class BrownieETHCall(ETHCall):
         return value
 
 
-class ETHWrapper:
-    proxy_kind = None
-    libraries_required = []
+class BrownieProvider:
     eth_call = BrownieETHCall
 
-    def __init__(self, owner="owner", *init_params):
-        self.owner = AddressBook.instance.get_account(owner)
-        for library in self.libraries_required:
-            get_contract_factory(library).deploy({"from": self.owner})
-        eth_contract = get_contract_factory(self.eth_contract)
-        if self.proxy_kind is None:
-            self.contract = eth_contract.deploy(*init_params, {"from": self.owner})
-        elif self.proxy_kind == "uups" and not SKIP_PROXY:
-            real_contract = eth_contract.deploy({"from": self.owner})
-            proxy_contract = brownie.ERC1967Proxy.deploy(
+    def __init__(self, time_control=None, address_book=None):
+        self.time_control = time_control or BrownieTimeControl()
+        self.address_book = address_book or BrownieAddressBook(accounts)
+
+    def get_contract_factory(self, eth_contract):
+        ret = getattr(brownie, eth_contract, None)
+        if ret is not None:
+            return ret
+        # Might be a manually loaded project or an interface
+        project = brownie.project.get_loaded_projects()[0]
+        ret = getattr(project, eth_contract, None)
+        if ret is not None:
+            return ret
+        return getattr(project.interface, eth_contract)
+
+    def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
+        eth_wrapper.owner = self.address_book.get_account(owner)
+        for library in eth_wrapper.libraries_required:
+            self.get_contract_factory(library).deploy({"from": eth_wrapper.owner})
+        eth_contract = self.get_contract_factory(eth_wrapper.eth_contract)
+        if eth_wrapper.proxy_kind is None:
+            eth_wrapper.contract = eth_contract.deploy(*init_params, {"from": eth_wrapper.owner})
+        elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
+            real_contract = eth_contract.deploy({"from": eth_wrapper.owner})
+            proxy_contract = self.get_contract_factory("ERC1967Proxy").deploy(
                 real_contract, encode_function_data(real_contract.initialize, *init_params),
-                {"from": self.owner}
+                {"from": eth_wrapper.owner}
             )
-            self.contract = Contract.from_abi(self.eth_contract, proxy_contract.address, eth_contract.abi)
-        elif self.proxy_kind == "uups" and SKIP_PROXY:
-            self.contract = eth_contract.deploy({"from": self.owner})
-            self.contract.initialize(*init_params, {"from": self.owner})
+            eth_wrapper.contract = Contract.from_abi(eth_wrapper.eth_contract, proxy_contract.address,
+                                                     eth_contract.abi)
+        elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
+            eth_wrapper.contract = eth_contract.deploy({"from": eth_wrapper.owner})
+            eth_wrapper.contract.initialize(*init_params, {"from": eth_wrapper.owner})
 
-    @classmethod
-    def connect(cls, contract, owner=None):
-        """Connects a wrapper to an existing deployed object"""
-        obj = cls.__new__(cls)
-        if isinstance(contract, str):
-            eth_contract = get_contract_factory(cls.eth_contract)
-            contract = Contract.from_abi(cls.eth_contract, contract, eth_contract.abi)
-        obj.contract = contract
-        obj.owner = owner
-        return obj
-
-    @property
-    def contract_id(self):
-        return self.contract.address
-
-    def _get_account(self, name):
-        return AddressBook.instance.get_account(name)
-
-    def _get_name(self, account):
-        return AddressBook.instance.get_name(account)
-
-    grant_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
-
-    @contextmanager
-    def as_(self, user):
-        prev_auto_from = getattr(self, "_auto_from", "missing")
-        self._auto_from = self._get_account(user)
-        try:
-            yield self
-        finally:
-            if prev_auto_from == "missing":
-                del self._auto_from
-            else:
-                self._auto_from = prev_auto_from
-
-
-class IERC20(IERC20Mixin, ETHWrapper):
-    pass
-
-
-class IERC721(IERC721Mixin, ETHWrapper):
-    pass
+    def build_contract(self, contract_address, contract_factory):
+        return Contract.from_abi(contract_factory.name, contract_address, contract_factory.abi)

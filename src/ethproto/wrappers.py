@@ -1,10 +1,28 @@
 """Base module for wrappers"""
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from functools import partial
 from .wadray import Wad, Ray
 from Crypto.Hash import keccak
+from environs import Env
+
+env = Env()
+
+SKIP_PROXY = env.bool("SKIP_PROXY", False)
+DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", "brownie")
 
 MAXUINT256 = 2**256 - 1
+
+_providers = {}
+
+
+def get_provider(provider_key=None):
+    return _providers[provider_key or DEFAULT_PROVIDER]
+
+
+def register_provider(provider_key, provider):
+    global _providers
+    _providers[provider_key] = provider
 
 
 class MethodAdapter:
@@ -96,11 +114,11 @@ class ETHCall(ABC):
             else:
                 raise TypeError(f"{self.eth_method}() missing required argument: '{arg_name}'")
             if arg_type == "msg.sender":
-                msg_args["from"] = self.parse("address", arg_value)
+                msg_args["from"] = self.parse(wrapper, "address", arg_value)
             elif arg_type == "msg.value":
-                msg_args["value"] = self.parse("amount", arg_value)
+                msg_args["value"] = self.parse(wrapper, "amount", arg_value)
             else:
-                call_args.append(self.parse(arg_type, arg_value))
+                call_args.append(self.parse(wrapper, arg_type, arg_value))
 
         if "from" not in msg_args and hasattr(wrapper, "_auto_from"):
             msg_args["from"] = wrapper._auto_from
@@ -112,7 +130,7 @@ class ETHCall(ABC):
             ret_value = eth_function(*call_args)
         except Exception as err:
             self._handle_exception(err)
-        return self.unparse(self.eth_return_type, ret_value)
+        return self.unparse(wrapper, self.eth_return_type, ret_value)
 
     @classmethod
     def _parse_keccak256(cls, value):
@@ -123,17 +141,77 @@ class ETHCall(ABC):
         return k.hexdigest()
 
     @classmethod
-    def unparse(cls, value_type, value):
+    def unparse(cls, wrapper, value_type, value):
         if value_type == "amount":
             return Wad(value)
         if value_type == "ray":
             return Ray(value)
         if value_type == "address":
-            return AddressBook.instance.get_name(value)
+            return wrapper.provider.address_book.get_name(value)
         return value
 
 
-class IERC20Mixin:
+class ETHWrapper:
+    proxy_kind = None
+    libraries_required = []
+
+    def __init__(self, owner="owner", *init_params, **kwargs):
+        self.provider_key = kwargs.get("provider_key", None)
+        self.provider.init_eth_wrapper(self, owner, init_params, kwargs)
+        self._auto_from = self.owner
+
+    @property
+    def provider(self):
+        return get_provider(self.provider_key)
+
+    @property
+    def eth_call(self):
+        return self.provider.eth_call
+
+    @classmethod
+    def connect(cls, contract, owner=None, provider_key=None):
+        """Connects a wrapper to an existing deployed object"""
+        provider = get_provider(provider_key)
+        if isinstance(contract, str):  # It's an address
+            contract_factory = provider.get_contract_factory(cls.eth_contract)
+            contract = provider.build_contract(contract, contract_factory)
+        return cls.build_from_contract(contract, owner, provider_key)
+
+    @classmethod
+    def build_from_contract(cls, contract, owner=None, provider_key=None):
+        obj = cls.__new__(cls)
+        obj.provider_key = provider_key
+        obj.contract = contract
+        obj.owner = get_provider(provider_key).address_book.get_account(owner)
+        obj._auto_from = obj.owner
+        return obj
+
+    @property
+    def contract_id(self):
+        return self.contract.address
+
+    def _get_account(self, name):
+        return self.provider.address_book.get_account(name)
+
+    def _get_name(self, account):
+        return self.provider.address_book.get_name(account)
+
+    grant_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
+
+    @contextmanager
+    def as_(self, user):
+        prev_auto_from = getattr(self, "_auto_from", "missing")
+        self._auto_from = self._get_account(user)
+        try:
+            yield self
+        finally:
+            if prev_auto_from == "missing":
+                del self._auto_from
+            else:
+                self._auto_from = prev_auto_from
+
+
+class IERC20(ETHWrapper):
     eth_contract = "IERC20Metadata"
 
     name = MethodAdapter((), "string", is_property=True)
@@ -160,7 +238,7 @@ class IERC20Mixin:
     ), "bool")
 
 
-class IERC721Mixin:
+class IERC721(ETHWrapper):
     name = MethodAdapter((), "string", is_property=True)
     symbol = MethodAdapter((), "string", is_property=True)
     total_supply = MethodAdapter((), "int")

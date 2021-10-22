@@ -6,5 +6,7 @@ compiler:
       runs: 200
     dependencies:
      - OpenZeppelin/openzeppelin-contracts@4.3.2
+     - OpenZeppelin/openzeppelin-contracts-upgradeable@4.3.2
     remappings:
-     - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.3.2"
+     - "@openzeppelin/contracts=OpenZeppelin/openzeppelin-contracts@4.3.2/contracts"
+     - "@openzeppelin/contracts-upgradeable=OpenZeppelin/openzeppelin-contracts-upgradeable@4.3.2/contracts"

@@ -39,6 +39,7 @@ You can do it using a Docker image an a few commands
    docker run -it -v $PWD:/code -w /code gnarvaja/eth-dev:1.0.0 bash
    pip install tox
    brownie pm install OpenZeppelin/openzeppelin-contracts@4.3.2
+   brownie pm install OpenZeppelin/openzeppelin-contracts-upgradeable@4.3.2
    tox -e default-br
 
 
