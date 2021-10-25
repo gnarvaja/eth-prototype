@@ -132,13 +132,17 @@ class W3Provider:
         self.contracts_path = contracts_path or CONTRACT_JSON_PATH
         self.contract_def_cache = {}
         self.address_book = address_book or W3AddressBook(w3)
+        self.time_control = W3TimeControl(w3)
 
     def get_contract_def(self, eth_contract):
         if eth_contract not in self.contract_def_cache:
             json_file = None
             for contract_path in self.contracts_path:
-                if os.path.exists(os.path.join(contract_path, f"{eth_contract}.json")):
-                    json_file = os.path.join(contract_path, f"{eth_contract}.json")
+                for sub_path, _, files in os.walk(contract_path):
+                    if f"{eth_contract}.json" in files:
+                        json_file = os.path.join(sub_path, f"{eth_contract}.json")
+                        break
+                if json_file is not None:
                     break
             else:
                 raise RuntimeError(f"{eth_contract} JSON definition not found in {self.contracts_path}")
@@ -148,6 +152,11 @@ class W3Provider:
     def get_contract_factory(self, eth_contract):
         contract_def = self.get_contract_def(eth_contract)
         return self.w3.eth.contract(abi=contract_def["abi"], bytecode=contract_def.get("bytecode", None))
+
+    def deploy(self, eth_contract, init_params, from_, **kwargs):
+        factory = self.get_contract_factory(eth_contract)
+        kwargs["from"] = from_
+        return self.construct(factory, init_params, kwargs)
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
         eth_wrapper.owner = self.address_book.get_account(owner)

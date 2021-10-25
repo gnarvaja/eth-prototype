@@ -130,6 +130,11 @@ class BrownieProvider:
             return ret
         return getattr(project.interface, eth_contract)
 
+    def deploy(self, eth_contract, init_params, from_, **kwargs):
+        factory = self.get_contract_factory(eth_contract)
+        kwargs["from"] = from_
+        return factory.deploy(*init_params, kwargs)
+
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
         eth_wrapper.owner = self.address_book.get_account(owner)
         for library in eth_wrapper.libraries_required:
