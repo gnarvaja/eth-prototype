@@ -3,13 +3,12 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
 from .wadray import Wad, Ray
-from Crypto.Hash import keccak
 from environs import Env
 
 env = Env()
 
 SKIP_PROXY = env.bool("SKIP_PROXY", False)
-DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", "brownie")
+DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", None)
 
 MAXUINT256 = 2**256 - 1
 
@@ -17,7 +16,14 @@ _providers = {}
 
 
 def get_provider(provider_key=None):
-    return _providers[provider_key or DEFAULT_PROVIDER]
+    global DEFAULT_PROVIDER
+    provider_key = provider_key or DEFAULT_PROVIDER
+    if provider_key is None:
+        if len(_providers) == 1:
+            provider_key = next(iter(_providers.keys()))
+        else:
+            raise RuntimeError("No provider installed or no default provider specified")
+    return _providers[provider_key]
 
 
 def register_provider(provider_key, provider):
@@ -154,6 +160,7 @@ class ETHCall(ABC):
 
     @classmethod
     def _parse_keccak256(cls, value):
+        from Crypto.Hash import keccak  # To avoid import of wrappers breaks if keccak not installed
         if value.startswith("0x"):
             return value
         k = keccak.new(digest_bits=256)

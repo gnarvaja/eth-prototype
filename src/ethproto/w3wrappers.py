@@ -166,7 +166,7 @@ class W3Provider:
         if eth_wrapper.proxy_kind is None:
             eth_wrapper.contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
         elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
-            real_contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
+            real_contract = self.construct(eth_contract, (), {"from": eth_wrapper.owner})
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
             init_data = real_contract.functions.initialize(*init_params).buildTransaction()["data"]
             proxy_contract = self.construct(
