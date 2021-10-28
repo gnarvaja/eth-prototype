@@ -89,6 +89,10 @@ class AddressBook(ABC):
     def set_instance(cls, obj):
         cls.instance = obj
 
+    def get_signer_account(self, address):
+        "Returns a LocalAccount or other object that can sign transactions"
+        raise NotImplementedError()
+
 
 class ETHCall(ABC):
     def __init__(self, eth_method, eth_args, eth_return_type="", adapt_args=None, eth_variant=None):
