@@ -37,11 +37,14 @@ You can do it using a Docker image an a few commands
 .. code-block:: bash
 
    docker run -it -v $PWD:/code -w /code gnarvaja/eth-dev:1.0.0 bash
+   gnarvaja/eth-dev:eth-proto-brownie
    pip install tox
    brownie pm install OpenZeppelin/openzeppelin-contracts@4.3.2
    brownie pm install OpenZeppelin/openzeppelin-contracts-upgradeable@4.3.2
-   tox -e default-br
+   tox -e py39-br
 
+   docker run -it -v $PWD:/code -w /code gnarvaja/eth-dev:eth-proto-brownie bash
+   tox -e py39-br
 
 .. _pyscaffold-notes:
 

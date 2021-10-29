@@ -81,7 +81,8 @@ class BrownieETHCall(ETHCall):
             raise RevertError(err.revert_msg)
         super()._handle_exception(err)
 
-    def _get_eth_function(self, wrapper, eth_method, eth_variant=None):
+    @classmethod
+    def get_eth_function(cls, wrapper, eth_method, eth_variant=None):
         if eth_variant:
             return getattr(wrapper.contract, eth_method)[eth_variant]
         else:

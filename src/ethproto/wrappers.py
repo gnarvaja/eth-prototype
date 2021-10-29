@@ -102,8 +102,8 @@ class ETHCall(ABC):
         self.adapt_args = adapt_args
         self.eth_variant = eth_variant
 
-    @abstractmethod
-    def _get_eth_function(self, wrapper, eth_method, eth_variant=None):
+    @classmethod
+    def get_eth_function(cls, wrapper, eth_method, eth_variant=None):
         raise NotImplementedError()
 
     def _handle_exception(self, err):
@@ -134,7 +134,7 @@ class ETHCall(ABC):
             msg_args["from"] = wrapper._auto_from
         call_args.append(msg_args)
 
-        eth_function = self._get_eth_function(wrapper, self.eth_method, self.eth_variant)
+        eth_function = self.get_eth_function(wrapper, self.eth_method, self.eth_variant)
 
         try:
             ret_value = eth_function(*call_args)
@@ -235,6 +235,11 @@ class ETHWrapper:
         return self.provider.address_book.get_name(account)
 
     grant_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
+    revoke_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
+    renounce_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
+    has_role = MethodAdapter((("role", "keccak256"), ("user", "address")), "bool")
+    get_role_admin = MethodAdapter((("role", "keccak256"), ), "address")
+    get_role_admin = MethodAdapter((("role", "keccak256"), ), "bytes32")
 
     @contextmanager
     def as_(self, user):

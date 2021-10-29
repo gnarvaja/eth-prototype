@@ -11,7 +11,7 @@ from web3.middleware import geth_poa_middleware
 env = Env()
 
 CONTRACT_JSON_PATH = env.list("CONTRACT_JSON_PATH", [], delimiter=":")
-TRANSACT_MODE = env.str("TRANSACT_MODE", "transact")
+W3_TRANSACT_MODE = env.str("W3_TRANSACT_MODE", "transact")
 W3_ADDRESS_BOOK_PREFIX = env.str("W3_ADDRESS_BOOK_PREFIX", "W3_ADDR_")
 W3_ADDRESS_BOOK_CREATE_UNKNOWN = env.str("W3_ADDRESS_BOOK_CREATE_UNKNOWN", "")
 
@@ -61,10 +61,10 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
 
 
 def transact(provider, function, tx_kwargs):
-    if TRANSACT_MODE == "transact":
+    if W3_TRANSACT_MODE == "transact":
         # uses eth_sendTransaction
         tx_hash = function.transact(provider.tx_kwargs | tx_kwargs)
-    elif TRANSACT_MODE == "sign-and-send":
+    elif W3_TRANSACT_MODE == "sign-and-send":
         tx_kwargs = provider.tx_kwargs | tx_kwargs
         from_ = tx_kwargs.pop("from")
         if isinstance(from_, BaseAccount):
@@ -76,7 +76,7 @@ def transact(provider, function, tx_kwargs):
             tx_kwargs | {"nonce": provider.w3.eth.get_transaction_count(from_.address)}
         )
         signed_tx = from_.sign_transaction(tx)
-        tx_hash = provider.w3.eth.sendRawTransaction(signed_tx.rawTransaction)
+        tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
     return provider.w3.eth.wait_for_transaction_receipt(tx_hash)
 
 
@@ -182,16 +182,18 @@ class W3EnvAddressBook(AddressBook):
 
 
 class W3ETHCall(ETHCall):
-    def _find_function_abi(self, contract, eth_method, eth_variant):
+    @classmethod
+    def find_function_abi(cls, contract, eth_method, eth_variant):
         abis = [x for x in contract.abi if "name" in x and x["name"] == eth_method]
         if len(abis) == 1:
             return abis[0]
         # TODO: eth_variant
         raise RuntimeError(f"Method {eth_method} not found")
 
-    def _get_eth_function(self, wrapper, eth_method, eth_variant=None):
+    @classmethod
+    def get_eth_function(cls, wrapper, eth_method, eth_variant=None):
         function = getattr(wrapper.contract.functions, eth_method)  # TODO: eth_variant
-        function_abi = self._find_function_abi(wrapper.contract, eth_method, eth_variant)
+        function_abi = cls.find_function_abi(wrapper.contract, eth_method, eth_variant)
         if function_abi["stateMutability"] in ("pure", "view"):
             def eth_function(*args):
                 if args and type(args[-1]) == dict:
