@@ -1,7 +1,9 @@
 import os
 import json
 from .contracts import RevertError
-from .wrappers import ETHCall, AddressBook, MAXUINT256, ETHWrapper, SKIP_PROXY, register_provider
+from .wrappers import (
+    ETHCall, AddressBook, MAXUINT256, ETHWrapper, SKIP_PROXY, register_provider, BaseProvider
+)
 from environs import Env
 from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
@@ -63,9 +65,9 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
 def transact(provider, function, tx_kwargs):
     if W3_TRANSACT_MODE == "transact":
         # uses eth_sendTransaction
-        tx_hash = function.transact(provider.tx_kwargs | tx_kwargs)
+        tx_hash = function.transact({**provider.tx_kwargs, **tx_kwargs})
     elif W3_TRANSACT_MODE == "sign-and-send":
-        tx_kwargs = provider.tx_kwargs | tx_kwargs
+        tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
         from_ = tx_kwargs.pop("from")
         if isinstance(from_, BaseAccount):
             tx_kwargs["from"] = from_.address
@@ -73,7 +75,7 @@ def transact(provider, function, tx_kwargs):
             from_ = provider.address_book.get_signer_account(from_)
             tx_kwargs["from"] = from_.address
         tx = function.buildTransaction(
-            tx_kwargs | {"nonce": provider.w3.eth.get_transaction_count(from_.address)}
+            {**tx_kwargs, **{"nonce": provider.w3.eth.get_transaction_count(from_.address)}}
         )
         signed_tx = from_.sign_transaction(tx)
         tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
@@ -240,7 +242,7 @@ class W3ETHCall(ETHCall):
         return value
 
 
-class W3Provider:
+class W3Provider(BaseProvider):
     eth_call = W3ETHCall
 
     def __init__(self, w3, address_book=None, contracts_path=None, tx_kwargs=None):
@@ -297,6 +299,8 @@ class W3Provider:
         """
         contract = eth_wrapper.contract
         event = getattr(contract.events, event_name)
+        if "fromBlock" not in filter_kwargs:
+            filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
         event_filter = event.createFilter(**filter_kwargs)
         return event_filter.get_all_entries()
 
@@ -312,11 +316,11 @@ class W3Provider:
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
             init_data = real_contract.functions.initialize(
                 *init_params
-            ).buildTransaction(self.tx_kwargs | {"from": eth_wrapper.owner})["data"]
+            ).buildTransaction({**self.tx_kwargs, **{"from": eth_wrapper.owner}})["data"]
             proxy_contract = self.construct(
                 ERC1967Proxy,
                 (real_contract.address, init_data),
-                self.tx_kwargs | {"from": eth_wrapper.owner}
+                {**self.tx_kwargs, **{"from": eth_wrapper.owner}}
             )
             eth_wrapper.contract = self.w3.eth.contract(
                 abi=eth_contract.abi,

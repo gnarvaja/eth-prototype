@@ -1,5 +1,5 @@
 from .contracts import RevertError
-from .wrappers import ETHCall, AddressBook, MAXUINT256, SKIP_PROXY, ETHWrapper
+from .wrappers import ETHCall, AddressBook, MAXUINT256, SKIP_PROXY, ETHWrapper, BaseProvider
 import eth_utils
 from brownie import accounts
 import brownie
@@ -113,7 +113,7 @@ class BrownieETHCall(ETHCall):
         return value
 
 
-class BrownieProvider:
+class BrownieProvider(BaseProvider):
     eth_call = BrownieETHCall
 
     def __init__(self, time_control=None, address_book=None):
@@ -130,6 +130,9 @@ class BrownieProvider:
         if ret is not None:
             return ret
         return getattr(project.interface, eth_contract)
+
+    def get_events(self, *args, **kwargs):
+        raise NotImplementedError()
 
     def deploy(self, eth_contract, init_params, from_, **kwargs):
         factory = self.get_contract_factory(eth_contract)

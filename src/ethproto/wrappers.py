@@ -3,12 +3,17 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
 from .wadray import Wad, Ray
+import requests
 from environs import Env
 
 env = Env()
 
 SKIP_PROXY = env.bool("SKIP_PROXY", False)
 DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", None)
+
+ETHERSCAN_TOKEN = env.str("ETHERSCAN_TOKEN", None)
+ETHERSCAN_DOMAIN = env.str("ETHERSCAN_DOMAIN", "api.etherscan.io")
+ETHERSCAN_URL = env.str("ETHERSCAN_URL", "https://{domain}/api?apikey={token}&")
 
 MAXUINT256 = 2**256 - 1
 
@@ -182,6 +187,48 @@ class ETHCall(ABC):
         return value
 
 
+class BaseProvider(ABC):
+    @abstractmethod
+    def get_contract_factory(self, eth_contract):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_events(self, eth_wrapper, event_name, filter_kwargs={}):
+        raise NotImplementedError()
+
+    def get_etherscan_url(self):
+        if ETHERSCAN_TOKEN is None:
+            return None
+        return ETHERSCAN_URL.format(token=ETHERSCAN_TOKEN, domain=ETHERSCAN_DOMAIN)
+
+    def get_first_block(self, eth_wrapper):
+        etherscan_url = self.get_etherscan_url()
+        if not etherscan_url:
+            return 0
+        address = self.get_contract_address(eth_wrapper)
+        url = (
+            etherscan_url + f"&module=account&action=txlist&address={address}&startblock=0&" +
+            "endblock=99999999&page=1&offset=10&sort=asc"
+        )
+        resp = requests.get(url)
+        resp.raise_for_status()
+        resp = resp.json()
+        if not resp["result"]:
+            return -1
+        return int(resp["result"][0]["blockNumber"])
+
+    def get_contract_address(self, eth_wrapper):
+        return eth_wrapper.contract.address
+
+    @abstractmethod
+    def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
+        pass
+
+    @abstractmethod
+    def build_contract(self, contract_address, contract_factory, contract_name=None):
+        raise NotImplementedError
+
+
 class ETHWrapper:
     proxy_kind = None
     libraries_required = []
@@ -252,6 +299,9 @@ class ETHWrapper:
                 del self._auto_from
             else:
                 self._auto_from = prev_auto_from
+
+    def set_auto_from(self, user):
+        self._auto_from = user
 
 
 class IERC20(ETHWrapper):
