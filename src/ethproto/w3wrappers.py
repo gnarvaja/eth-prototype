@@ -9,6 +9,7 @@ from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
+from eth_event import get_topic_map, decode_logs
 
 env = Env()
 
@@ -183,6 +184,35 @@ class W3EnvAddressBook(AddressBook):
         return self.signers[address]
 
 
+class ReceiptWrapper:
+    """Class that makes w3 receipts more user friendly"""
+
+    def __init__(self, receipt, contract):
+        self._receipt = receipt
+        self._contract = contract
+
+    @property
+    def events(self):
+        if not hasattr(self, "_events"):
+            topic_map = get_topic_map(self._contract.abi)
+            logs = decode_logs(self._receipt.logs, topic_map, allow_undecoded=True)
+            evts = {}
+            for evt in logs:
+                evt_name = evt["name"]
+                evt_params = dict((d["name"], d["value"]) for d in evt["data"])
+                if evt_name not in evts:
+                    evts[evt_name] = evt_params
+                elif type(evts[evt_name]) == dict:
+                    evts[evt_name] = [evts[evt_name], evt_params]  # start a list
+                else:  # it's already a list
+                    evts[evt_name].append(evt_params)
+            self._events = evts
+        return self._events
+
+    def __getattr__(self, attr_name):
+        return getattr(self._receipt, attr_name)
+
+
 class W3ETHCall(ETHCall):
     @classmethod
     def find_function_abi(cls, contract, eth_method, eth_variant):
@@ -193,7 +223,7 @@ class W3ETHCall(ETHCall):
         raise RuntimeError(f"Method {eth_method} not found")
 
     @classmethod
-    def get_eth_function(cls, wrapper, eth_method, eth_variant=None):
+    def get_eth_function_and_mutability(cls, wrapper, eth_method, eth_variant=None):
         function = getattr(wrapper.contract.functions, eth_method)  # TODO: eth_variant
         function_abi = cls.find_function_abi(wrapper.contract, eth_method, eth_variant)
         if function_abi["stateMutability"] in ("pure", "view"):
@@ -210,7 +240,10 @@ class W3ETHCall(ETHCall):
                     transact_args = None  # Will use default_account??
                 return transact(wrapper.provider, function(*args), (transact_args or {}))
 
-        return eth_function
+        return eth_function, function_abi["stateMutability"]
+
+    def normalize_receipt(self, wrapper, receipt):
+        return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):
         if str(err).startswith("execution reverted: "):
@@ -219,6 +252,12 @@ class W3ETHCall(ETHCall):
 
     @classmethod
     def parse(cls, wrapper, value_type, value):
+        if value_type.startswith("(") and value_type.endswith(")"):
+            # It's a tuple / struct
+            value_types = [t.strip() for t in value_type.split(",")]
+            return tuple(
+                cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
+            )
         if value_type == "address":
             if isinstance(value, (LocalAccount, Account)):
                 return value

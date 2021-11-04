@@ -204,6 +204,9 @@ class TestERC20Token:
     def test_approve_flow(self, token_class):
         token = token_class(owner="owner", name="TEST", symbol="TEST", initial_supply=_W(2000))
         token.approve("owner", "Spender", _W(500))
+        if hasattr(token, "last_receipt"):
+            assert "Approval" in token.last_receipt.events
+            assert token.last_receipt.events["Approval"]["value"] == _W(500)
         assert token.allowance("owner", "Spender") == _W(500)
 
         token.transfer_from("Spender", "owner", "Guillo", _W(200))

@@ -95,7 +95,7 @@ class AddressBook(ABC):
         cls.instance = obj
 
     def get_signer_account(self, address):
-        "Returns a LocalAccount or other object that can sign transactions"
+        """Returns a LocalAccount or other object that can sign transactions"""
         raise NotImplementedError()
 
 
@@ -109,7 +109,18 @@ class ETHCall(ABC):
 
     @classmethod
     def get_eth_function(cls, wrapper, eth_method, eth_variant=None):
+        return cls.get_eth_function_and_mutability(wrapper, eth_method, eth_variant)[0]
+
+    @classmethod
+    def get_eth_function_and_mutability(cls, wrapper, eth_method, eth_variant=None):
         raise NotImplementedError()
+
+    def normalize_receipt(self, wrapper, receipt):
+        """
+        Function to normalize receipts to behave somewhat similar
+        (taking brownie receipts as interface for now)
+        """
+        return receipt
 
     def _handle_exception(self, err):
         raise err
@@ -139,12 +150,16 @@ class ETHCall(ABC):
             msg_args["from"] = wrapper._auto_from
         call_args.append(msg_args)
 
-        eth_function = self.get_eth_function(wrapper, self.eth_method, self.eth_variant)
+        eth_function, mutability = self.get_eth_function_and_mutability(
+            wrapper, self.eth_method, self.eth_variant
+        )
 
         try:
             ret_value = eth_function(*call_args)
         except Exception as err:
             self._handle_exception(err)
+        if mutability in ("payable", "nonpayable"):  # ret_value is a receipt
+            ret_value = self.normalize_receipt(wrapper, ret_value)
         return self.unparse(wrapper, self.eth_return_type, ret_value)
 
     @classmethod
@@ -178,12 +193,25 @@ class ETHCall(ABC):
 
     @classmethod
     def unparse(cls, wrapper, value_type, value):
+        if value_type.startswith("(") and value_type.endswith(")"):
+            # It's a tuple / struct
+            value_types = [t.strip() for t in value_type.strip("()").split(",")]
+            return tuple(
+                cls.unparse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
+            )
         if value_type == "amount":
             return Wad(value)
         if value_type == "ray":
             return Ray(value)
         if value_type == "address":
-            return wrapper.provider.address_book.get_name(value)
+            name = wrapper.provider.address_book.get_name(value)
+            return name or value
+        if value_type == "":
+            wrapper.add_receipt(value)
+            return value
+        if value_type == "receipt":
+            wrapper.add_receipt(value)
+            return value
         return value
 
 
@@ -248,6 +276,17 @@ class ETHWrapper:
     @property
     def provider(self):
         return get_provider(self.provider_key)
+
+    def add_receipt(self, receipt):
+        if not hasattr(self, "_receipts"):
+            self._receipts = []
+        self._receipts.append(receipt)
+
+    @property
+    def last_receipt(self):
+        if not hasattr(self, "_receipts") or not self._receipts:
+            return None
+        return self._receipts[-1]
 
     @property
     def eth_call(self):
@@ -314,11 +353,11 @@ class IERC20(ETHWrapper):
     balance_of = MethodAdapter((("account", "address"), ), "amount")
     transfer = MethodAdapter((
         ("sender", "msg.sender"), ("recipient", "address"), ("amount", "amount")
-    ), "bool")
+    ), "receipt")
 
     allowance = MethodAdapter((("owner", "address"), ("spender", "address")), "amount")
     approve = MethodAdapter((("owner", "msg.sender"), ("spender", "address"), ("amount", "amount")),
-                            "bool")
+                            "receipt")
     increase_allowance = MethodAdapter(
         (("owner", "msg.sender"), ("spender", "address"), ("amount", "amount"))
     )
@@ -328,7 +367,7 @@ class IERC20(ETHWrapper):
 
     transfer_from = MethodAdapter((
         ("spender", "msg.sender"), ("sender", "address"), ("recipient", "address"), ("amount", "amount")
-    ), "bool")
+    ), "receipt")
 
 
 class IERC721(ETHWrapper):
@@ -339,7 +378,7 @@ class IERC721(ETHWrapper):
     owner_of = MethodAdapter((("token_id", "int"), ), "address")
     approve = MethodAdapter((
         ("sender", "msg.sender"), ("spender", "address"), ("token_id", "int")
-    ), "bool")
+    ), "receipt")
     get_approved = MethodAdapter((("token_id", "int"), ), "address")
     set_approval_for_all = MethodAdapter((
         ("sender", "msg.sender"), ("operator", "address"), ("approved", "bool")
@@ -347,7 +386,7 @@ class IERC721(ETHWrapper):
     is_approved_for_all = MethodAdapter((("owner", "address"), ("operator", "address")), "bool")
     transfer_from = MethodAdapter((
         ("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")
-    ), "bool")
+    ), "receipt")
     transfer = MethodAdapter((
         ("sender", "msg.sender"), ("recipient", "address"), ("amount", "amount")
-    ), "bool")
+    ), "receipt")

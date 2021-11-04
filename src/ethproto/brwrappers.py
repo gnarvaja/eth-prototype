@@ -89,7 +89,18 @@ class BrownieETHCall(ETHCall):
             return getattr(wrapper.contract, eth_method)
 
     @classmethod
+    def get_eth_function_and_mutability(cls, wrapper, eth_method, eth_variant=None):
+        function = cls.get_eth_function(wrapper, eth_method, eth_variant)
+        return function, function.abi["stateMutability"]
+
+    @classmethod
     def parse(cls, wrapper, value_type, value):
+        if value_type.startswith("(") and value_type.endswith(")"):
+            # It's a tuple / struct
+            value_types = [t.strip() for t in value_type.strip("()").split(",")]
+            return tuple(
+                cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
+            )
         if value_type == "address":
             if isinstance(value, (LocalAccount, Account)):
                 return value
@@ -131,8 +142,33 @@ class BrownieProvider(BaseProvider):
             return ret
         return getattr(project.interface, eth_contract)
 
-    def get_events(self, *args, **kwargs):
-        raise NotImplementedError()
+    def get_events(self, eth_wrapper, event_name, filter_kwargs={}):
+        """Returns a list of events given a filter, like this:
+
+        >>> provider.get_events(currencywrapper, "Transfer", dict(fromBlock=0))
+        [AttributeDict({
+            'args': AttributeDict(
+                {'from': '0x0000000000000000000000000000000000000000',
+                 'to': '0x56Cd397bAA08F2339F0ae470DEA99D944Ac064bB',
+                 'value': 6000000000000000000000}),
+            'event': 'Transfer',
+            'logIndex': 0,
+            'transactionIndex': 0,
+            'transactionHash': HexBytes(
+                '0x406b2cf8de2f12f4d0958e9f0568dc0919f337ed399f8d8d78ddbc648c01f806'
+                ),
+            'address': '0xf8BedC7458fb8cAbD616B5e90F57c34c392e7168',
+            'blockHash': HexBytes('0x7b23c6ea49759bcee769b1a357dec7f63f03bdb1dd13f1ee19868925954134b3'),
+            'blockNumber': 23
+        })]
+        """
+        w3 = brownie.network.web3
+        w3_contract = w3.eth.contract(abi=eth_wrapper.contract.abi, address=eth_wrapper.contract.address)
+        event = getattr(w3_contract.events, event_name)
+        if "fromBlock" not in filter_kwargs:
+            filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
+        event_filter = event.createFilter(**filter_kwargs)
+        return event_filter.get_all_entries()
 
     def deploy(self, eth_contract, init_params, from_, **kwargs):
         factory = self.get_contract_factory(eth_contract)
