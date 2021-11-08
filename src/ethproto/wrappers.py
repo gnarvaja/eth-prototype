@@ -261,17 +261,40 @@ class ETHWrapper:
     proxy_kind = None
     libraries_required = []
     constructor_args = None
+    initialize_args = None
 
     def __init__(self, owner="owner", *init_params, **kwargs):
         self.provider_key = kwargs.get("provider_key", None)
-        if self.constructor_args is not None:
-            init_params, transaction_kwargs = self.eth_call.parse_args(
-                self, self.constructor_args, *init_params, **kwargs
-            )
-            if transaction_kwargs:
-                kwargs.update(transaction_kwargs)
+        init_params = self._parse_init_params(init_params, kwargs)
         self.provider.init_eth_wrapper(self, owner, init_params, kwargs)
         self._auto_from = self.owner
+
+    def _parse_init_params(self, init_params, kwargs):
+        if self.proxy_kind is None:
+            if self.constructor_args is not None:
+                init_params, transaction_kwargs = self.eth_call.parse_args(
+                    self, self.constructor_args, *init_params, **kwargs
+                )
+                if transaction_kwargs:
+                    kwargs.update(transaction_kwargs)
+            return init_params
+        else:
+            if self.constructor_args:
+                constructor_params, transaction_kwargs = self.eth_call.parse_args(
+                    self, self.constructor_args, *init_params[:len(self.constructor_args)], **kwargs
+                )
+                init_params = init_params[len(self.constructor_args):]
+                if transaction_kwargs:
+                    kwargs.update(transaction_kwargs)
+            else:
+                constructor_params = ()
+            if self.initialize_args:
+                init_params, transaction_kwargs = self.eth_call.parse_args(
+                    self, self.initialize_args, *init_params, **kwargs
+                )
+                if transaction_kwargs:
+                    kwargs.update(transaction_kwargs)
+            return constructor_params, init_params
 
     @property
     def provider(self):

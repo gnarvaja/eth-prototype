@@ -51,6 +51,9 @@ class TestCurrencyUUPS(TestCurrency):
     proxy_kind = "uups"
     eth_contract = "TestCurrencyUUPS"
 
+    constructor_args = ()
+    initialize_args = (("name", "string"), ("symbol", "string"), ("initial_supply", "amount"))
+
 
 class TestNFT(wrappers.IERC721):
     __test__ = False

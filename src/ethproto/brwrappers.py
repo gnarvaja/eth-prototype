@@ -69,7 +69,7 @@ def encode_function_data(initializer=None, *args):
     Returns:
         [bytes]: Return the encoded bytes.
     """
-    if len(args) == 0 or not initializer:
+    if not initializer:
         return eth_utils.to_bytes(hexstr="0x")
     else:
         return initializer.encode_input(*args)
@@ -183,15 +183,18 @@ class BrownieProvider(BaseProvider):
         if eth_wrapper.proxy_kind is None:
             eth_wrapper.contract = eth_contract.deploy(*init_params, {"from": eth_wrapper.owner})
         elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
-            real_contract = eth_contract.deploy({"from": eth_wrapper.owner})
+            constructor_params, init_params = init_params
+            real_contract = eth_contract.deploy(*constructor_params, {"from": eth_wrapper.owner})
             proxy_contract = self.get_contract_factory("ERC1967Proxy").deploy(
-                real_contract, encode_function_data(real_contract.initialize, *init_params),
+                real_contract,
+                encode_function_data(getattr(real_contract, "initialize", None), *init_params),
                 {"from": eth_wrapper.owner}
             )
             eth_wrapper.contract = Contract.from_abi(eth_wrapper.eth_contract, proxy_contract.address,
                                                      eth_contract.abi)
         elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
-            eth_wrapper.contract = eth_contract.deploy({"from": eth_wrapper.owner})
+            constructor_params, init_params = init_params
+            eth_wrapper.contract = eth_contract.deploy(*constructor_params, {"from": eth_wrapper.owner})
             eth_wrapper.contract.initialize(*init_params, {"from": eth_wrapper.owner})
 
     def build_contract(self, contract_address, contract_factory, contract_name=None):
