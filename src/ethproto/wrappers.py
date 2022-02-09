@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
-from .wadray import Wad, Ray
+from .wadray import Wad, Ray, make_integer_float
 import requests
 from environs import Env
 
@@ -14,6 +14,13 @@ DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", None)
 ETHERSCAN_TOKEN = env.str("ETHERSCAN_TOKEN", None)
 ETHERSCAN_DOMAIN = env.str("ETHERSCAN_DOMAIN", "api.etherscan.io")
 ETHERSCAN_URL = env.str("ETHERSCAN_URL", "https://{domain}/api?apikey={token}&")
+AMOUNT_DECIMALS = env.int("AMOUNT_DECIMALS", 18)
+AMOUNT_CLASSNAME = env.str("AMOUNT_CLASSNAME", None)
+
+if AMOUNT_DECIMALS == 18:
+    AMOUNT_CLASS = Wad
+else:
+    AMOUNT_CLASS = make_integer_float(AMOUNT_DECIMALS, AMOUNT_CLASSNAME)
 
 MAXUINT256 = 2**256 - 1
 
@@ -213,7 +220,7 @@ class ETHCall(ABC):
                 cls.unparse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
             )
         if value_type == "amount":
-            return Wad(value)
+            return AMOUNT_CLASS(value)
         if value_type == "ray":
             return Ray(value)
         if value_type == "address":
