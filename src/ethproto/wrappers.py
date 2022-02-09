@@ -28,7 +28,20 @@ def get_provider(provider_key=None):
             provider_key = next(iter(_providers.keys()))
         else:
             raise RuntimeError("No provider installed or no default provider specified")
+    if provider_key not in _providers:
+        auto_register_provider(provider_key)
     return _providers[provider_key]
+
+
+def auto_register_provider(provider_key):
+    if provider_key == "w3":
+        from .w3wrappers import register_w3_provider
+        register_w3_provider()
+    elif provider_key == "brownie":
+        from .brwrappers import BrownieProvider
+        register_provider("brownie", BrownieProvider())
+    else:
+        raise RuntimeError(f"Unknown provider {provider_key}")
 
 
 def register_provider(provider_key, provider):

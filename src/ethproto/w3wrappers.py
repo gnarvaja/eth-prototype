@@ -80,6 +80,12 @@ def transact(provider, function, tx_kwargs):
         )
         signed_tx = from_.sign_transaction(tx)
         tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+    elif W3_TRANSACT_MODE == "defender-async":
+        from .defender_relay import send_transaction
+        tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
+        tx = function.buildTransaction(tx_kwargs)
+        return send_transaction(tx)
+
     return provider.w3.eth.wait_for_transaction_receipt(tx_hash)
 
 
@@ -243,6 +249,8 @@ class W3ETHCall(ETHCall):
         return eth_function, function_abi["stateMutability"]
 
     def normalize_receipt(self, wrapper, receipt):
+        if W3_TRANSACT_MODE == "defender-async":
+            return receipt  # Don't do anything because the receipt it's just a dict of not-yet-mined tx
         return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):
