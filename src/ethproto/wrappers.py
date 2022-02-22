@@ -414,6 +414,8 @@ class IERC20(ETHWrapper):
 
 
 class IERC721(ETHWrapper):
+    eth_contract = "IERC721Metadata"
+
     name = MethodAdapter((), "string", is_property=True)
     symbol = MethodAdapter((), "string", is_property=True)
     total_supply = MethodAdapter((), "int")

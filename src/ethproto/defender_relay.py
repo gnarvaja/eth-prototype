@@ -11,6 +11,7 @@ DEFENDER_POOL = env.str("DEFENDER_POOL", "us-west-2_iLmIggsiy")
 DEFENDER_CLIENT = env.str("DEFENDER_CLIENT", "1bpd19lcr33qvg5cr3oi79rdap")
 DEFENDER_API_URL = env.str("DEFENDER_API_URL", "https://api.defender.openzeppelin.com")
 DEFENDER_SPEED = env.str("DEFENDER_SPEED", None)
+DEFENDER_GAS_LIMIT_FACTOR = env.float("DEFENDER_GAS_LIMIT_FACTOR", 1)
 
 token = None
 token_expires = None
@@ -46,7 +47,8 @@ def get_token():
 
 def send_transaction(tx):
     tx_for_defender = {k: v for (k, v) in tx.items() if k in ("to", "value", "data", "chainId")}
-    tx_for_defender["gasLimit"] = tx["gas"]
+    if DEFENDER_GAS_LIMIT_FACTOR:
+        tx_for_defender["gasLimit"] = int(tx["gas"] * DEFENDER_GAS_LIMIT_FACTOR)
     if DEFENDER_SPEED:
         tx_for_defender["speed"] = DEFENDER_SPEED
 
