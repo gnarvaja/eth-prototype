@@ -190,8 +190,12 @@ class BrownieProvider(BaseProvider):
                 encode_function_data(getattr(real_contract, "initialize", None), *init_params),
                 {"from": eth_wrapper.owner}
             )
-            eth_wrapper.contract = Contract.from_abi(eth_wrapper.eth_contract, proxy_contract.address,
-                                                     eth_contract.abi)
+
+            # Replace the proxy contract with the implementation in brownie's state
+            # This makes the gas reports work properly for uups contracts
+            self.get_contract_factory("ERC1967Proxy").remove(proxy_contract)
+            eth_wrapper.contract = eth_contract.at(proxy_contract.address)
+
         elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
             constructor_params, init_params = init_params
             eth_wrapper.contract = eth_contract.deploy(*constructor_params, {"from": eth_wrapper.owner})
