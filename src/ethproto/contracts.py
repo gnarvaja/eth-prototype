@@ -479,7 +479,7 @@ class ERC721Token(AccessControlContract):   # NFT
             self._token_count += 1
             token_id = self._token_count
         if token_id in self.owners:
-            raise RevertError("Already exists")
+            raise RevertError("ERC721: token already minted")
         self.balances[to] = self.balances.get(to, 0) + 1
         self.owners[token_id] = to
 
@@ -535,6 +535,15 @@ class ERC721Token(AccessControlContract):   # NFT
         if sender != owner and self.token_approvals.get(token_id, None) != sender and \
                 sender not in self.operator_approvals.get(owner, []):
             raise RevertError("ERC721: transfer caller is not owner nor approved")
+        return self._transfer(from_, to, token_id)
+
+    @external
+    def safe_transfer_from(self, sender, from_, to, token_id):
+        owner = self.owners[token_id]
+        if sender != owner and self.token_approvals.get(token_id, None) != sender and \
+                sender not in self.operator_approvals.get(owner, []):
+            raise RevertError("ERC721: transfer caller is not owner nor approved")
+        # TODO: if `to` is contract, call onERC721Received
         return self._transfer(from_, to, token_id)
 
     def _transfer(self, from_, to, token_id):

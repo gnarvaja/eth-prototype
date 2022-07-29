@@ -432,6 +432,6 @@ class IERC721(ETHWrapper):
     transfer_from = MethodAdapter((
         ("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")
     ), "receipt")
-    transfer = MethodAdapter((
-        ("sender", "msg.sender"), ("recipient", "address"), ("amount", "amount")
-    ), "receipt")
+    safe_transfer_from = MethodAdapter((
+        ("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")
+    ), "receipt", eth_variant="address, address, uint256")
