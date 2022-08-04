@@ -223,6 +223,8 @@ class ETHCall(ABC):
             return AMOUNT_CLASS(value)
         if value_type == "ray":
             return Ray(value)
+        if value_type == "wad":
+            return Wad(value)
         if value_type == "address":
             name = wrapper.provider.address_book.get_name(value)
             return name or value
