@@ -1,3 +1,4 @@
+import re
 from .contracts import RevertError
 from .wrappers import ETHCall, AddressBook, MAXUINT256, SKIP_PROXY, ETHWrapper, BaseProvider
 import eth_utils
@@ -76,9 +77,18 @@ def encode_function_data(initializer=None, *args):
 
 
 class BrownieETHCall(ETHCall):
+    error_match = [
+        re.compile('VM Exception while processing transaction: revert with reason "([^"]+)"')
+    ]
+
     def _handle_exception(self, err):
         if isinstance(err, VirtualMachineError) and err.revert_type == "revert":
             raise RevertError(err.revert_msg)
+        # Tries to match error by regex
+        for err_regex in self.error_match:
+            m = err_regex.match(str(err))
+            if m:
+                raise RevertError(m.group(1))
         super()._handle_exception(err)
 
     @classmethod
