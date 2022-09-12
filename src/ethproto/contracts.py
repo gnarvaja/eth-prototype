@@ -382,12 +382,14 @@ class ERC20Token(AccessControlContract):
                 yield account
 
     def mint(self, address, amount):
+        address = self._parse_account(address)
         self.balances[address] = self.balances.get(address, self.ZERO) + amount
         self._total_supply += amount
 
     def burn(self, address, amount):
         if amount == self.ZERO:
             return
+        address = self._parse_account(address)
         balance = self.balances.get(address, self.ZERO)
         require(amount <= balance, "Not enought balance to burn")
         if amount == balance:
