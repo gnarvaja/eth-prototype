@@ -17,7 +17,7 @@ CONTRACT_JSON_PATH = env.list("CONTRACT_JSON_PATH", [], delimiter=":")
 W3_TRANSACT_MODE = env.str("W3_TRANSACT_MODE", "transact")
 W3_ADDRESS_BOOK_PREFIX = env.str("W3_ADDRESS_BOOK_PREFIX", "W3_ADDR_")
 W3_ADDRESS_BOOK_CREATE_UNKNOWN = env.str("W3_ADDRESS_BOOK_CREATE_UNKNOWN", "")
-
+W3_POA = env.str("W3_POA", "auto")
 
 class W3TimeControl:
     def __init__(self, w3):
@@ -44,10 +44,14 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
         w3 = Web3(Web3.EthereumTesterProvider())
     else:
         from web3.auto import w3
-    assert w3.isConnected()
-    try:
-        w3.eth.get_block("latest")
-    except ExtraDataLengthError:
+    
+    if W3_POA == "auto":
+        assert w3.isConnected()
+        try:
+            w3.eth.get_block("latest")
+        except ExtraDataLengthError:
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    elif W3_POA == "yes":
         w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
     # If address_book not provided and there are envs with W3_ADDRESS_BOOK_PREFIX,
