@@ -195,11 +195,17 @@ class BrownieProvider(BaseProvider):
         elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
             constructor_params, init_params = init_params
             real_contract = eth_contract.deploy(*constructor_params, {"from": eth_wrapper.owner})
-            proxy_contract = self.get_contract_factory("ERC1967Proxy").deploy(
-                real_contract,
-                encode_function_data(getattr(real_contract, "initialize", None), *init_params),
-                {"from": eth_wrapper.owner}
-            )
+            proxy_factory = self.get_contract_factory("ERC1967Proxy")
+            try:
+                proxy_contract = proxy_factory.deploy(
+                    real_contract,
+                    encode_function_data(getattr(real_contract, "initialize", None), *init_params),
+                    {"from": eth_wrapper.owner}
+                )
+            except VirtualMachineError as err:
+                if err.revert_type == "revert":
+                    raise RevertError(err.revert_msg)
+                raise
 
             # Replace the proxy contract with the implementation in brownie's state
             # This makes the gas reports work properly for uups contracts

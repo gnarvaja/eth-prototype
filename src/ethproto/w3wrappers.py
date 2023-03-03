@@ -19,6 +19,7 @@ W3_ADDRESS_BOOK_PREFIX = env.str("W3_ADDRESS_BOOK_PREFIX", "W3_ADDR_")
 W3_ADDRESS_BOOK_CREATE_UNKNOWN = env.str("W3_ADDRESS_BOOK_CREATE_UNKNOWN", "")
 W3_POA = env.str("W3_POA", "auto")
 
+
 class W3TimeControl:
     def __init__(self, w3):
         self.w3 = w3
@@ -44,7 +45,7 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
         w3 = Web3(Web3.EthereumTesterProvider())
     else:
         from web3.auto import w3
-    
+
     if W3_POA == "auto":
         assert w3.isConnected()
         try:
@@ -389,11 +390,16 @@ class W3Provider(BaseProvider):
             )
 
     def construct(self, contract_factory, constructor_args=(), transact_kwargs={}):
-        receipt = transact(
-            self,
-            contract_factory.constructor(*constructor_args),
-            transact_kwargs
-        )
+        try:
+            receipt = transact(
+                self,
+                contract_factory.constructor(*constructor_args),
+                transact_kwargs
+            )
+        except Exception as err:
+            if str(err).startswith("execution reverted: "):
+                raise RevertError(str(err)[len("execution reverted: "):])
+            raise
         return self.w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
 
     def build_contract(self, contract_address, contract_factory, contract_name=None):
