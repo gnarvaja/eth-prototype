@@ -226,6 +226,8 @@ class ETHCall(ABC):
         if value_type == "wad":
             return Wad(value)
         if value_type == "address":
+            if value == "0x0000000000000000000000000000000000000000":
+                return None
             name = wrapper.provider.address_book.get_name(value)
             return name or value
         if value_type == "":
