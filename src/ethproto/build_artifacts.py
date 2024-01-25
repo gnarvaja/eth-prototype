@@ -49,6 +49,12 @@ class Artifact:
             deployedLinkReferences=self.deployed_link_references,
         )
 
+    def libraries(self) -> Tuple[str, str]:
+        """Generates a tuple of (library, source) for each library reference in the artifact"""
+        for source, libs in self.link_references.items():
+            for lib in libs.keys():
+                yield lib, source
+
     def _replace_link_references(
         self, bytecode: str, link_references: dict, libraries: dict
     ) -> str:

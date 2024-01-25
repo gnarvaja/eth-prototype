@@ -111,3 +111,15 @@ def test_artifact_link_missing_addresses():
     artifact = library.get_artifact("contracts/CounterWithLibrary.sol")
     with pytest.raises(ValueError, match="Missing library address for Count"):
         artifact.link({})
+
+
+def test_artifact_libraries_generator():
+    library = ArtifactLibrary(os.path.join(HARDHAT_PROJECT, "artifacts"))
+
+    artifact = library.get_artifact("contracts/CounterWithLibrary.sol")
+    libraries = list(artifact.libraries())
+    assert libraries == [("Count", "contracts/Count.sol")]
+
+    artifact_with_no_libraries = library.get_artifact("contracts/Counter.sol")
+    libraries = list(artifact_with_no_libraries.libraries())
+    assert libraries == []

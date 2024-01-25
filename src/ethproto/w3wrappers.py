@@ -2,14 +2,22 @@ import os
 import json
 from .contracts import RevertError
 from .wrappers import (
-    ETHCall, AddressBook, MAXUINT256, ETHWrapper, SKIP_PROXY, register_provider, BaseProvider
+    ETHCall,
+    AddressBook,
+    MAXUINT256,
+    ETHWrapper,
+    SKIP_PROXY,
+    register_provider,
+    BaseProvider,
 )
+from .build_artifacts import ArtifactLibrary
 from environs import Env
 from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
-from eth_event import get_topic_map, decode_logs
+
+# from eth_event import get_topic_map, decode_logs
 
 env = Env()
 
@@ -42,12 +50,13 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
 
     if tester:
         from web3 import Web3
+
         w3 = Web3(Web3.EthereumTesterProvider())
     else:
         from web3.auto import w3
 
     if W3_POA == "auto":
-        assert w3.isConnected()
+        assert w3.is_connected()
         try:
             w3.eth.get_block("latest")
         except ExtraDataLengthError:
@@ -81,12 +90,16 @@ def transact(provider, function, tx_kwargs):
             from_ = provider.address_book.get_signer_account(from_)
             tx_kwargs["from"] = from_.address
         tx = function.buildTransaction(
-            {**tx_kwargs, **{"nonce": provider.w3.eth.get_transaction_count(from_.address)}}
+            {
+                **tx_kwargs,
+                **{"nonce": provider.w3.eth.get_transaction_count(from_.address)},
+            }
         )
         signed_tx = from_.sign_transaction(tx)
         tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
     elif W3_TRANSACT_MODE == "defender-async":
         from .defender_relay import send_transaction
+
         tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
         tx = function.buildTransaction(tx_kwargs)
         return send_transaction(tx)
@@ -123,7 +136,7 @@ class W3AddressBook(AddressBook):
         return self.name_to_address[name]
 
     def get_name(self, account_or_address):
-        if isinstance(account_or_address, (LocalAccount, )):
+        if isinstance(account_or_address, (LocalAccount,)):
             account_or_address = account_or_address.address
 
         for name, addr in self.name_to_address.items():
@@ -151,7 +164,7 @@ class W3EnvAddressBook(AddressBook):
                 continue
             if k.endswith("_ADDR"):
                 continue  # Addresses linked to names
-            addr = k[len(env_prefix):]
+            addr = k[len(env_prefix) :]
             if addr.startswith("0x"):
                 account = w3.account.from_key(value)
                 assert account.address == addr
@@ -183,7 +196,7 @@ class W3EnvAddressBook(AddressBook):
         raise RuntimeError(f"No account found for name {name}")
 
     def get_name(self, account_or_address):
-        if isinstance(account_or_address, (LocalAccount, )):
+        if isinstance(account_or_address, (LocalAccount,)):
             account_or_address = account_or_address.address
 
         for name, addr in self.name_to_address.items():
@@ -204,6 +217,7 @@ class ReceiptWrapper:
 
     @property
     def events(self):
+        raise NotImplementedError("Replace abandoned eth_events with native web3py")
         if not hasattr(self, "_events"):
             topic_map = get_topic_map(self._contract.abi)
             logs = decode_logs(self._receipt.logs, topic_map, allow_undecoded=True)
@@ -238,11 +252,14 @@ class W3ETHCall(ETHCall):
         function = getattr(wrapper.contract.functions, eth_method)  # TODO: eth_variant
         function_abi = cls.find_function_abi(wrapper.contract, eth_method, eth_variant)
         if function_abi["stateMutability"] in ("pure", "view"):
+
             def eth_function(*args):
                 if args and type(args[-1]) == dict:
                     args = args[:-1]  # remove dict with {from: ...}
                 return function(*args).call()
+
         else:  # Mutable function, need to send and wait transaction
+
             def eth_function(*args):
                 if args and type(args[-1]) == dict:
                     transact_args = args[-1]
@@ -260,7 +277,7 @@ class W3ETHCall(ETHCall):
 
     def _handle_exception(self, err):
         if str(err).startswith("execution reverted: "):
-            raise RevertError(str(err)[len("execution reverted: "):])
+            raise RevertError(str(err)[len("execution reverted: ") :])
         super()._handle_exception(err)
 
     @classmethod
@@ -268,14 +285,12 @@ class W3ETHCall(ETHCall):
         if value_type.startswith("(") and value_type.endswith(")"):
             # It's a tuple / struct
             value_types = [t.strip() for t in value_type.split(",")]
-            return tuple(
-                cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
-            )
+            return tuple(cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types))
         if value_type == "address":
             if isinstance(value, (LocalAccount, Account)):
                 return value
-#            elif isinstance(value, (Contract, ProjectContract)):
-#                return value.address
+            #            elif isinstance(value, (Contract, ProjectContract)):
+            #                return value.address
             elif isinstance(value, ETHWrapper):
                 return value.contract.address
             elif isinstance(value, str) and value.startswith("0x"):
@@ -299,30 +314,19 @@ class W3Provider(BaseProvider):
 
     def __init__(self, w3, address_book=None, contracts_path=None, tx_kwargs=None):
         self.w3 = w3
-        self.contracts_path = contracts_path or CONTRACT_JSON_PATH
-        self.contract_def_cache = {}
+        self.artifact_library = ArtifactLibrary(
+            *(contracts_path if contracts_path is not None else CONTRACT_JSON_PATH)
+        )
         self.address_book = address_book or W3AddressBook(w3)
         self.time_control = W3TimeControl(w3)
         self.tx_kwargs = tx_kwargs or {}
 
     def get_contract_def(self, eth_contract):
-        if eth_contract not in self.contract_def_cache:
-            json_file = None
-            for contract_path in self.contracts_path:
-                for sub_path, _, files in os.walk(contract_path):
-                    if f"{eth_contract}.json" in files:
-                        json_file = os.path.join(sub_path, f"{eth_contract}.json")
-                        break
-                if json_file is not None:
-                    break
-            else:
-                raise RuntimeError(f"{eth_contract} JSON definition not found in {self.contracts_path}")
-            self.contract_def_cache[eth_contract] = json.load(open(json_file))
-        return self.contract_def_cache[eth_contract]
+        return self.artifact_library.get_artifact_by_name(eth_contract)
 
     def get_contract_factory(self, eth_contract):
         contract_def = self.get_contract_def(eth_contract)
-        return self.w3.eth.contract(abi=contract_def["abi"], bytecode=contract_def.get("bytecode", None))
+        return self.w3.eth.contract(abi=contract_def.abi, bytecode=contract_def.bytecode)
 
     def deploy(self, eth_contract, init_params, from_, **kwargs):
         factory = self.get_contract_factory(eth_contract)
@@ -358,47 +362,50 @@ class W3Provider(BaseProvider):
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
         eth_wrapper.owner = self.address_book.get_account(owner)
-        assert not eth_wrapper.libraries_required, "Not supported"
 
-        eth_contract = self.get_contract_factory(eth_wrapper.eth_contract)
+        contract_def = self.get_contract_def(eth_wrapper.eth_contract)
+        libraries = {}
+        for lib, _ in contract_def.libraries():
+            if lib not in libraries:
+                library_def = self.get_contract_factory(lib)
+                library = self.construct(library_def)
+                libraries[lib] = library.address
+
+        if libraries:
+            contract_def = contract_def.link(libraries)
+
+        eth_contract = self.w3.eth.contract(abi=contract_def.abi, bytecode=contract_def.bytecode)
+
         if eth_wrapper.proxy_kind is None:
             eth_wrapper.contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
         elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
             constructor_params, init_params = init_params
             real_contract = self.construct(eth_contract, constructor_params, {"from": eth_wrapper.owner})
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
-            init_data = real_contract.functions.initialize(
-                *init_params
-            ).buildTransaction({**self.tx_kwargs, **{"from": eth_wrapper.owner}})["data"]
+            init_data = eth_contract.encodeABI(fn_name="initialize", args=init_params)
             proxy_contract = self.construct(
                 ERC1967Proxy,
                 (real_contract.address, init_data),
-                {**self.tx_kwargs, **{"from": eth_wrapper.owner}}
+                {**self.tx_kwargs, **{"from": eth_wrapper.owner}},
             )
-            eth_wrapper.contract = self.w3.eth.contract(
-                abi=eth_contract.abi,
-                address=proxy_contract.address
-            )
+            eth_wrapper.contract = self.w3.eth.contract(abi=eth_contract.abi, address=proxy_contract.address)
         elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
             constructor_params, init_params = init_params
-            eth_wrapper.contract = self.construct(eth_contract, constructor_params,
-                                                  {"from": eth_wrapper.owner})
+            eth_wrapper.contract = self.construct(
+                eth_contract, constructor_params, {"from": eth_wrapper.owner}
+            )
             transact(
                 self,
                 eth_wrapper.contract.functions.initialize(*init_params),
-                {"from": eth_wrapper.owner}
+                {"from": eth_wrapper.owner},
             )
 
     def construct(self, contract_factory, constructor_args=(), transact_kwargs={}):
         try:
-            receipt = transact(
-                self,
-                contract_factory.constructor(*constructor_args),
-                transact_kwargs
-            )
+            receipt = transact(self, contract_factory.constructor(*constructor_args), transact_kwargs)
         except Exception as err:
             if str(err).startswith("execution reverted: "):
-                raise RevertError(str(err)[len("execution reverted: "):])
+                raise RevertError(str(err)[len("execution reverted: ") :])
             raise
         return self.w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
 
