@@ -1,23 +1,25 @@
-import os
 import json
-from .contracts import RevertError
-from .wrappers import (
-    ETHCall,
-    AddressBook,
-    MAXUINT256,
-    ETHWrapper,
-    SKIP_PROXY,
-    register_provider,
-    BaseProvider,
-)
-from .build_artifacts import ArtifactLibrary
+import os
+
 from environs import Env
 from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
+from eth_utils.abi import event_abi_to_log_topic
+from hexbytes import HexBytes
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
 
-# from eth_event import get_topic_map, decode_logs
+from .build_artifacts import ArtifactLibrary
+from .contracts import RevertError
+from .wrappers import (
+    MAXUINT256,
+    SKIP_PROXY,
+    AddressBook,
+    BaseProvider,
+    ETHCall,
+    ETHWrapper,
+    register_provider,
+)
 
 env = Env()
 
@@ -217,14 +219,20 @@ class ReceiptWrapper:
 
     @property
     def events(self):
-        raise NotImplementedError("Replace abandoned eth_events with native web3py")
         if not hasattr(self, "_events"):
-            topic_map = get_topic_map(self._contract.abi)
-            logs = decode_logs(self._receipt.logs, topic_map, allow_undecoded=True)
+            topic_map = {
+                HexBytes(event_abi_to_log_topic(event().abi)): event() for event in self._contract.events
+            }
+            logs = []
+            for log in self._receipt.logs:
+                for topic in log.topics:
+                    if topic in topic_map:
+                        logs.extend(topic_map[topic].process_receipt(self._receipt))
+
             evts = {}
             for evt in logs:
-                evt_name = evt["name"]
-                evt_params = dict((d["name"], d["value"]) for d in evt["data"])
+                evt_name = evt.event
+                evt_params = evt.args
                 if evt_name not in evts:
                     evts[evt_name] = evt_params
                 elif type(evts[evt_name]) == dict:
