@@ -8,6 +8,8 @@ from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
+from web3.contract import Contract
+from web3.datastructures import AttributeDict
 
 from .build_artifacts import ArtifactLibrary
 from .contracts import RevertError
@@ -123,11 +125,11 @@ class W3AddressBook(AddressBook):
         return self._eth_accounts
 
     def get_account(self, name):
-        if isinstance(name, (Account, LocalAccount)):
+        if isinstance(name, BaseAccount):
             return name
         if name is None:
             return self.ZERO
-        if type(name) == str and name.startswith("0x"):
+        if isinstance(name, str) and name.startswith("0x"):
             return name
         if name not in self.name_to_address:
             self.last_account_used += 1
@@ -219,6 +221,7 @@ class ReceiptWrapper:
 
     @property
     def events(self):
+        import ipdb; ipdb.set_trace()  # fmt: skip
         if not hasattr(self, "_events"):
             topic_map = {
                 HexBytes(event_abi_to_log_topic(event().abi)): event() for event in self._contract.events
@@ -235,7 +238,7 @@ class ReceiptWrapper:
                 evt_params = evt.args
                 if evt_name not in evts:
                     evts[evt_name] = evt_params
-                elif type(evts[evt_name]) == dict:
+                elif isinstance(evts[evt_name], (dict, AttributeDict)):
                     evts[evt_name] = [evts[evt_name], evt_params]  # start a list
                 else:  # it's already a list
                     evts[evt_name].append(evt_params)
@@ -280,7 +283,7 @@ class W3ETHCall(ETHCall):
 
     def normalize_receipt(self, wrapper, receipt):
         if W3_TRANSACT_MODE == "defender-async":
-            return receipt  # Don't do anything because the receipt it's just a dict of not-yet-mined tx
+            return receipt  # Don't do anything because the receipt is just a dict of not-yet-mined tx
         return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):
@@ -295,12 +298,12 @@ class W3ETHCall(ETHCall):
             value_types = [t.strip() for t in value_type.split(",")]
             return tuple(cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types))
         if value_type == "address":
-            if isinstance(value, (LocalAccount, Account)):
-                return value
-            #            elif isinstance(value, (Contract, ProjectContract)):
-            #                return value.address
+            if isinstance(value, BaseAccount):
+                return value.address
             elif isinstance(value, ETHWrapper):
                 return value.contract.address
+            elif isinstance(value, Contract):
+                return value.address
             elif isinstance(value, str) and value.startswith("0x"):
                 return value
             return wrapper.provider.address_book.get_account(value)

@@ -51,3 +51,10 @@ MANIFEST
 # Per-project virtualenvs
 .venv*/
 .conda*/
+
+# Tests hardhat project
+tests/hardhat-project/artifacts/**/*.dbg.json
+tests/hardhat-project/artifacts/build-info
+tests/hardhat-project/cache
+tests/hardhat-project/node_modules
+tests/hardhat-project/package-lock.json
