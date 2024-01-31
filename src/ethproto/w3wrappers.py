@@ -1,4 +1,3 @@
-import json
 import os
 
 from environs import Env
@@ -6,10 +5,10 @@ from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
 from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
-from web3.exceptions import ExtraDataLengthError
-from web3.middleware import geth_poa_middleware
 from web3.contract import Contract
 from web3.datastructures import AttributeDict
+from web3.exceptions import ExtraDataLengthError
+from web3.middleware import geth_poa_middleware
 
 from .build_artifacts import ArtifactLibrary
 from .contracts import RevertError
@@ -221,7 +220,6 @@ class ReceiptWrapper:
 
     @property
     def events(self):
-        import ipdb; ipdb.set_trace()  # fmt: skip
         if not hasattr(self, "_events"):
             topic_map = {
                 HexBytes(event_abi_to_log_topic(event().abi)): event() for event in self._contract.events
