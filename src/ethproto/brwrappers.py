@@ -177,7 +177,7 @@ class BrownieProvider(BaseProvider):
         event = getattr(w3_contract.events, event_name)
         if "fromBlock" not in filter_kwargs:
             filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
-        event_filter = event.createFilter(**filter_kwargs)
+        event_filter = event.create_filter(**filter_kwargs)
         return event_filter.get_all_entries()
 
     def deploy(self, eth_contract, init_params, from_, **kwargs):

@@ -47,7 +47,7 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
         from web3.auto import w3
 
     if W3_POA == "auto":
-        assert w3.isConnected()
+        assert w3.is_connected()
         try:
             w3.eth.get_block("latest")
         except ExtraDataLengthError:
@@ -353,7 +353,7 @@ class W3Provider(BaseProvider):
         event = getattr(contract.events, event_name)
         if "fromBlock" not in filter_kwargs:
             filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
-        event_filter = event.createFilter(**filter_kwargs)
+        event_filter = event.create_filter(**filter_kwargs)
         return event_filter.get_all_entries()
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
@@ -369,7 +369,7 @@ class W3Provider(BaseProvider):
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
             init_data = real_contract.functions.initialize(
                 *init_params
-            ).buildTransaction({**self.tx_kwargs, **{"from": eth_wrapper.owner}})["data"]
+            ).build_transaction({**self.tx_kwargs, **{"from": eth_wrapper.owner}})["data"]
             proxy_contract = self.construct(
                 ERC1967Proxy,
                 (real_contract.address, init_data),
