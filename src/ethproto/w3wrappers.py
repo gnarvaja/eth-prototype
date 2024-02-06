@@ -1,4 +1,6 @@
 import os
+from collections import defaultdict
+from typing import Iterator, List, Union
 
 from environs import Env
 from eth_account.account import Account, LocalAccount
@@ -6,7 +8,6 @@ from eth_account.signers.base import BaseAccount
 from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.contract import Contract
-from web3.datastructures import AttributeDict
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
 
@@ -36,12 +37,12 @@ class W3TimeControl:
         self.w3 = w3
 
     def fast_forward(self, secs):
-        self.w3.provider.make_request("evm_increaseTime", [secs])
-        # Not tested!
+        """Mines a new block whose timestamp is secs after the latest block's timestamp."""
+        self.w3.provider.make_request("evm_mine", [self.now + secs])
 
     @property
     def now(self):
-        return self.w3.get_block("latest").timestamp
+        return self.w3.eth.get_block("latest").timestamp
 
 
 def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
@@ -230,21 +231,88 @@ class ReceiptWrapper:
                     if topic in topic_map:
                         logs.extend(topic_map[topic].process_receipt(self._receipt))
 
-            evts = {}
+            evts = defaultdict(list)
             for evt in logs:
                 evt_name = evt.event
                 evt_params = evt.args
-                if evt_name not in evts:
-                    evts[evt_name] = evt_params
-                elif isinstance(evts[evt_name], (dict, AttributeDict)):
-                    evts[evt_name] = [evts[evt_name], evt_params]  # start a list
-                else:  # it's already a list
-                    evts[evt_name].append(evt_params)
-            self._events = evts
+                evts[evt_name].append(evt_params)
+            self._events = {k: EventItem(k, v) for k, v in evts.items()}
         return self._events
 
     def __getattr__(self, attr_name):
         return getattr(self._receipt, attr_name)
+
+
+class EventItem:
+    """
+    Dict/list hybrid container, represents one or more events with the same name
+    that were fired in a transaction.
+
+    Inspired on eth-brownies brownie.network.event._EventItem class
+    """
+
+    def __init__(self, name: str, events: List) -> None:
+        self.name = name
+        self._events = events
+
+    def __getitem__(self, key: Union[int, str]) -> List:
+        """if key is int: returns the n'th event that was fired with this name
+        if key is str: returns the value of data field 'key' from the 1st event
+        within the container"""
+        if not isinstance(key, (int, str)):
+            raise TypeError(f"Invalid key type '{type(key)}' - can only use strings or integers")
+        if isinstance(key, int):
+            try:
+                return self._events[key]
+            except IndexError:
+                raise IndexError(
+                    f"Index {key} out of range - only {len(self._ordered)} '{self.name}' events fired"
+                )
+        if key in self._events[0]:
+            return self._events[0][key]
+        if f"{key} (indexed)" in self._events[0]:
+            return self._events[0][f"{key} (indexed)"]
+        valid_keys = ", ".join(self.keys())
+        raise KeyError(f"Unknown key '{key}' - the '{self.name}' event includes these keys: {valid_keys}")
+
+    def __contains__(self, name: str) -> bool:
+        """returns True if this event contains a value with the given name."""
+        return name in self._events[0]
+
+    def __len__(self) -> int:
+        """returns the number of events held in this container."""
+        return len(self._events)
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        if len(self._events) == 1:
+            return str(self._events[0])
+        return str([i[0] for i in self._events])
+
+    def __iter__(self) -> Iterator:
+        return iter(self._events)
+
+    def __eq__(self, other: object) -> bool:
+        if len(self._events) == 1:
+            if isinstance(other, (tuple, list)):
+                # sequences compare directly against the event values
+                return self._events[0].values() == other
+            return other == self._events[0]
+        return other == self._events
+
+    def items(self) -> List:
+        """EventItem.items() -> a list object providing a view on EventItem[0]'s items"""
+        return [(i, self[i]) for i in self.keys()]
+
+    def keys(self) -> List:
+        """EventItem.keys() -> a list object providing a view on EventItem[0]'s keys"""
+        return [i.replace(" (indexed)", "") for i in self._events[0].keys()]
+
+    def values(self) -> List:
+        """EventItem.values() -> a list object providing a view on EventItem[0]'s values"""
+        return self._events[0].values()
 
 
 class W3ETHCall(ETHCall):
@@ -288,6 +356,10 @@ class W3ETHCall(ETHCall):
         if str(err).startswith("execution reverted: "):
             raise RevertError(str(err)[len("execution reverted: ") :])
         super()._handle_exception(err)
+
+    def _get_msg_args(self):
+        # TODO: This needs to be zero for test runs, but forcing it to zero like this will break other clients
+        return {"gasPrice": 0}
 
     @classmethod
     def parse(cls, wrapper, value_type, value):
@@ -420,3 +492,7 @@ class W3Provider(BaseProvider):
 
     def build_contract(self, contract_address, contract_factory, contract_name=None):
         return self.w3.eth.contract(abi=contract_factory.abi, address=contract_address)
+
+    def unlock_account(self, address):
+        """Unlocks an account on the node. Assumes hardhat network API."""
+        self.w3.provider.make_request("hardhat_impersonateAccount", [address])

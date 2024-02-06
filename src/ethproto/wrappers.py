@@ -1,10 +1,14 @@
 """Base module for wrappers"""
+
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
-from .wadray import Wad, Ray, make_integer_float
+
 import requests
 from environs import Env
+from hexbytes import HexBytes
+
+from .wadray import Ray, Wad, make_integer_float
 
 env = Env()
 
@@ -154,9 +158,12 @@ class ETHCall(ABC):
     def _handle_exception(self, err):
         raise err
 
+    def _get_msg_args(self):
+        return {}
+
     def __call__(self, wrapper, *args, **kwargs):
         call_args = []
-        msg_args = {}
+        msg_args = self._get_msg_args()
 
         if self.adapt_args:
             args, kwargs = self.adapt_args(args, kwargs)
@@ -212,14 +219,19 @@ class ETHCall(ABC):
         return call_args, msg_args
 
     @classmethod
-    def _parse_keccak256(cls, value):
-        from Crypto.Hash import keccak  # To avoid import of wrappers breaks if keccak not installed
+    def _parse_keccak256(cls, value) -> HexBytes:
+        from Crypto.Hash import (
+            keccak,  # To avoid import of wrappers breaks if keccak not installed
+        )
+
+        if isinstance(value, HexBytes):
+            return value
 
         if value.startswith("0x"):
-            return value
+            return HexBytes(value)
         k = keccak.new(digest_bits=256)
         k.update(value.encode("utf-8"))
-        return k.hexdigest()
+        return HexBytes(k.hexdigest())
 
     @classmethod
     def unparse(cls, wrapper, value_type, value):
