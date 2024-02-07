@@ -141,6 +141,11 @@ class W3AddressBook(AddressBook):
                 self.name_to_address[name] = self.eth_accounts[self.last_account_used]
             except IndexError:
                 self.name_to_address[name] = self.w3.eth.account.create().address
+                # TODO: This branch only generates a random account and discards the private key. Unlike the accounts in
+                # self.eth_accounts this one is not unlocked on the node. Something like this is necessary for this to
+                # be useful (and consistent with other branches):
+                # self.provider.register_account(address, private_key)
+
         return self.name_to_address[name]
 
     def get_name(self, account_or_address):
