@@ -32,6 +32,10 @@ W3_ADDRESS_BOOK_CREATE_UNKNOWN = env.str("W3_ADDRESS_BOOK_CREATE_UNKNOWN", "")
 W3_POA = env.str("W3_POA", "auto")
 
 
+# TODO: This should probably be part of the AddressBook
+_contract_map = {}  # Address -> Contract
+
+
 class W3TimeControl:
     def __init__(self, w3):
         self.w3 = w3
@@ -222,17 +226,23 @@ class ReceiptWrapper:
     @property
     def events(self):
         if not hasattr(self, "_events"):
+            # Lookup the events in all known contracts
+            addresses = [log.address for log in self._receipt.logs]
+            contracts = {addr: _contract_map[addr] for addr in addresses if addr in _contract_map}
             topic_map = {
-                HexBytes(event_abi_to_log_topic(event().abi)): event() for event in self._contract.events
+                HexBytes(event_abi_to_log_topic(event().abi)): event()
+                for contract in contracts.values()
+                for event in contract.events
             }
-            logs = []
+
+            parsed_logs = []
             for log in self._receipt.logs:
                 for topic in log.topics:
                     if topic in topic_map:
-                        logs.extend(topic_map[topic].process_receipt(self._receipt))
+                        parsed_logs += topic_map[topic].process_receipt(self._receipt)
 
             evts = defaultdict(list)
-            for evt in logs:
+            for evt in parsed_logs:
                 evt_name = evt.event
                 evt_params = evt.args
                 evts[evt_name].append(evt_params)
@@ -438,7 +448,7 @@ class W3Provider(BaseProvider):
         event = getattr(contract.events, event_name)
         if "fromBlock" not in filter_kwargs:
             filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
-        event_filter = event.createFilter(**filter_kwargs)
+        event_filter = event.create_filter(**filter_kwargs)
         return event_filter.get_all_entries()
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
@@ -480,6 +490,8 @@ class W3Provider(BaseProvider):
                 eth_wrapper.contract.functions.initialize(*init_params),
                 {"from": eth_wrapper.owner},
             )
+
+        _contract_map[eth_wrapper.contract.address] = eth_wrapper.contract
 
     def construct(self, contract_factory, constructor_args=(), transact_kwargs={}):
         try:
