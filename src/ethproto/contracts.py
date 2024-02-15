@@ -1,11 +1,13 @@
 import os
 import time
+from contextlib import contextmanager
 from decimal import Decimal
 from functools import wraps
-from contextlib import contextmanager
+
 from m9g import Model
-from m9g.fields import IntField, DictField, StringField, TupleField, ListField
-from .wadray import Wad, Ray
+from m9g.fields import DictField, IntField, ListField, StringField, TupleField
+
+from .wadray import Ray, Wad
 
 __author__ = "Guillermo M. Narvaja"
 __copyright__ = "Guillermo M. Narvaja"
@@ -501,7 +503,7 @@ class ERC721Token(AccessControlContract):   # NFT
     @view
     def owner_of(self, token_id):
         if token_id not in self.owners:
-            raise RevertError("ERC721: owner query for nonexistent token")
+            raise RevertError("ERC721: invalid token ID")
         return self.owners[token_id]
 
     # def token_uri
@@ -536,7 +538,7 @@ class ERC721Token(AccessControlContract):   # NFT
         owner = self.owners[token_id]
         if sender != owner and self.token_approvals.get(token_id, None) != sender and \
                 sender not in self.operator_approvals.get(owner, []):
-            raise RevertError("ERC721: transfer caller is not owner nor approved")
+            raise RevertError("ERC721: caller is not token owner or approved")
         return self._transfer(from_, to, token_id)
 
     @external
@@ -544,7 +546,7 @@ class ERC721Token(AccessControlContract):   # NFT
         owner = self.owners[token_id]
         if sender != owner and self.token_approvals.get(token_id, None) != sender and \
                 sender not in self.operator_approvals.get(owner, []):
-            raise RevertError("ERC721: transfer caller is not owner nor approved")
+            raise RevertError("ERC721: caller is not token owner or approved")
         # TODO: if `to` is contract, call onERC721Received
         return self._transfer(from_, to, token_id)
 
