@@ -1,30 +1,25 @@
-from unittest import TestCase
 from functools import partial
+from unittest import TestCase
+
 import pytest
-from m9g.fields import IntField
-from ethproto.wadray import _W, Wad
-from ethproto.contracts import Contract, WadField, external, ERC20Token, RevertError, view, ERC721Token
-from ethproto import wrappers
 from environs import Env
+from m9g.fields import IntField
+
+from ethproto import wrappers
+from ethproto.contracts import (
+    Contract,
+    ERC20Token,
+    ERC721Token,
+    RevertError,
+    WadField,
+    external,
+    view,
+)
+from ethproto.wadray import _W, Wad
 
 env = Env()
 
 TEST_ENV = env.list("TEST_ENV", ["pure-python"])
-
-if "eth-brownie" in TEST_ENV:
-    # TODO: find a not so ugly way of doing this
-    from ethproto import brwrappers
-
-    from brownie.project import main
-    from brownie.network import connect
-    main.load("tests/brownie-project")
-    connect()
-    wrappers.register_provider("brownie", brwrappers.BrownieProvider())
-
-
-if "web3py" in TEST_ENV:
-    from ethproto import w3wrappers
-    w3wrappers.register_w3_provider(tester=env.bool("W3_TESTER", True))
 
 
 class TestCurrency(wrappers.IERC20):
@@ -97,7 +92,6 @@ class MyTestContract(Contract):
 
 
 class TestReversion(TestCase):
-
     def test_revert_rolls_back_changes(self):
         tcontract = MyTestContract()
         assert tcontract.counter == 10
@@ -138,15 +132,12 @@ def _connected_contract(eth_wrapper_class, *args, **kwargs):
 
 def _connected_contract_address(eth_wrapper_class, *args, **kwargs):
     eth_wrapper = eth_wrapper_class(*args, **kwargs)
-    return eth_wrapper_class.connect(eth_wrapper.contract.address, eth_wrapper.owner,
-                                     eth_wrapper.provider_key)
+    return eth_wrapper_class.connect(
+        eth_wrapper.contract.address, eth_wrapper.owner, eth_wrapper.provider_key
+    )
 
 
 ERC20TokenAlternatives = [ERC20Token]
-if "eth-brownie" in TEST_ENV:
-    ERC20TokenAlternatives.append(TestCurrency)
-    ERC20TokenAlternatives.append(partial(_connected_contract, TestCurrency))
-    ERC20TokenAlternatives.append(TestCurrencyUUPS)
 
 if "web3py" in TEST_ENV:
     ERC20TokenAlternatives.append(partial(TestCurrency, provider_key="w3"))
@@ -156,7 +147,6 @@ if "web3py" in TEST_ENV:
 
 @pytest.mark.parametrize("token_class", ERC20TokenAlternatives)
 class TestERC20Token:
-
     def _validate_total_supply(self, token):
         "Validates total_supply equals to the sum of all users balances"
         if self._is_w3(token):
@@ -233,15 +223,12 @@ class TestERC20Token:
 
 
 ERC721TokenAlternatives = [ERC721Token]
-if "eth-brownie" in TEST_ENV:
-    ERC721TokenAlternatives.append(TestNFT)
 if "web3py" in TEST_ENV:
     ERC721TokenAlternatives.append(partial(TestNFT, provider_key="w3"))
 
 
 @pytest.mark.parametrize("token_class", ERC721TokenAlternatives)
 class TestERC721Token:
-
     def test_mint_burn(self, token_class):
         nft = token_class(owner="owner", name="TEST", symbol="TEST")
 
@@ -253,7 +240,7 @@ class TestERC721Token:
         assert nft.owner_of(1235) == "CUST1"
         nft.burn("CUST1", 1235)
         assert nft.balance_of("CUST1") == 1
-        with pytest.raises(RevertError, match="query for nonexistent token"):
+        with pytest.raises(RevertError, match="ERC721: invalid token ID"):
             nft.owner_of(1235)
         nft.burn("CUST1", 1234)
         assert nft.balance_of("CUST1") == 0
@@ -308,5 +295,5 @@ class TestERC721Token:
         assert nft.balance_of("CUST2") == 2
         nft.set_approval_for_all("CUST1", "SPEND", False)
 
-        with pytest.raises(RevertError, match="ERC721: transfer caller is not owner nor approved"):
+        with pytest.raises(RevertError, match="ERC721: caller is not token owner or approved"):
             nft.transfer_from("SPEND", "CUST1", "CUST2", 1235)

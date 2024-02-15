@@ -1,5 +1,10 @@
-from eth_account import Account
+import os
+
+import pytest
+
 from ethproto import wrappers
+
+pytestmark = pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only tests")
 
 
 class Counter(wrappers.ETHWrapper):
@@ -26,22 +31,9 @@ class CounterUpgradeableWithLibrary(Counter):
     initialize_args = (("initial_value", "int"),)
 
 
-def test_deploy_counter():
-    counter = Counter(initial_value=0)
-    assert counter.value() == 0
-    counter.increase()
-    assert counter.value() == 1
-
-
-def test_deploy_counter_with_library():
-    counter = CounterWithLibrary(initial_value=1)
-    assert counter.value() == 1
-    counter.increase()
-    assert counter.value() == 2
-
-
-def test_deploy_upgradeable_counter_with_library():
-    counter = CounterUpgradeableWithLibrary(initial_value=0)
+@pytest.mark.parametrize("contract_class", [Counter, CounterWithLibrary, CounterUpgradeableWithLibrary])
+def test_deploy_counter(contract_class):
+    counter = contract_class(initial_value=0)
     assert counter.value() == 0
     counter.increase()
     assert counter.value() == 1
@@ -54,6 +46,8 @@ class Datatypes(wrappers.ETHWrapper):
 
 
 def test_address_arguments():
+    from eth_account import Account
+
     wrapper = Datatypes()
 
     account = Account.create("TEST TEST TEST")

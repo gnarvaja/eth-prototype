@@ -11,10 +11,13 @@ import os
 
 import pytest
 
-from ethproto import w3wrappers, wrappers
-
 
 def pytest_configure(config):
+    if os.environ.get("TEST_ENV", None) != "web3py":
+        return
+
+    from ethproto import w3wrappers, wrappers
+
     wrappers.DEFAULT_PROVIDER = "w3"
     w3wrappers.CONTRACT_JSON_PATH = ["tests/hardhat-project"]
     os.environ["WEB3_PROVIDER_URI"] = "http://localhost:5350"
@@ -23,13 +26,16 @@ def pytest_configure(config):
 @pytest.fixture(scope="module", autouse=True)
 def reset_provider():
     """Resets the provider for each module. Mainly for addressbook and contract map cleanse"""
-    from web3 import Web3
+    if os.environ.get("TEST_ENV", None) == "web3py":
+        from web3 import Web3
 
-    from ethproto.w3wrappers import W3Provider
+        from ethproto import w3wrappers, wrappers
 
-    wrappers.register_provider("w3", W3Provider(Web3()))
+        wrappers.register_provider("w3", w3wrappers.W3Provider(Web3()))
+        yield
+        wrappers.register_provider("w3", w3wrappers.W3Provider(Web3()))
+        return
     yield
-    wrappers.register_provider("w3", W3Provider(Web3()))
 
 
 # @pytest.fixture(autouse=True, scope="session")

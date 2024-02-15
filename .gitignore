@@ -57,4 +57,3 @@ MANIFEST
 tests/hardhat-project/artifacts
 tests/hardhat-project/cache
 tests/hardhat-project/node_modules
-tests/hardhat-project/package-lock.json

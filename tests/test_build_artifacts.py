@@ -1,7 +1,8 @@
 import os
+
 import pytest
 
-from ethproto.build_artifacts import ArtifactLibrary, Artifact
+from ethproto.build_artifacts import ArtifactLibrary
 
 # Get current file path
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -27,9 +28,9 @@ def test_artifact_library_fullpath_lookup_multiple_lookup_paths():
     assert counter_build.contract_name == "Counter"
     assert counter_build.link_references == {}
 
-    counter_build = library.get_artifact("TestCurrency.sol")
-    assert counter_build.contract_name == "TestCurrency"
-    assert counter_build.link_references == {}
+    contract_build = library.get_artifact("TestCurrency.sol")
+    assert contract_build.contract_name == "TestCurrency"
+    assert contract_build.link_references == {}
 
 
 def test_artifact_library_fullpath_notfound():
@@ -91,9 +92,7 @@ def test_artifact_link_with_libraries():
     library = ArtifactLibrary(os.path.join(HARDHAT_PROJECT, "artifacts"))
 
     artifact = library.get_artifact("contracts/CounterWithLibrary.sol")
-    linked_artifact = artifact.link(
-        {"Count": "0x1234567890123456789012345678901234567890"}
-    )
+    linked_artifact = artifact.link({"Count": "0x1234567890123456789012345678901234567890"})
 
     assert linked_artifact.bytecode == artifact.bytecode.replace(
         "__$69fad24a0434cdadf4afcd45c858c7bb14$__",

@@ -1,8 +1,14 @@
+import os
+
+import pytest
+
 from ethproto import wrappers
-from ethproto.w3wrappers import W3Provider
 
 
+@pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only test")
 def test_timecontrol():
+    from ethproto.w3wrappers import W3Provider
+
     provider = wrappers.get_provider()
     assert isinstance(provider, W3Provider)
     time_control = provider.time_control
