@@ -1,10 +1,14 @@
 """Base module for wrappers"""
+
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
-from .wadray import Wad, Ray, make_integer_float
+
 import requests
 from environs import Env
+from hexbytes import HexBytes
+
+from .wadray import Ray, Wad, make_integer_float
 
 env = Env()
 
@@ -43,9 +47,11 @@ def get_provider(provider_key=None):
 def auto_register_provider(provider_key):
     if provider_key == "w3":
         from .w3wrappers import register_w3_provider
+
         register_w3_provider()
     elif provider_key == "brownie":
         from .brwrappers import BrownieProvider
+
         register_provider("brownie", BrownieProvider())
     else:
         raise RuntimeError(f"Unknown provider {provider_key}")
@@ -57,8 +63,16 @@ def register_provider(provider_key, provider):
 
 
 class MethodAdapter:
-    def __init__(self, args=(), return_type="", eth_method=None, adapt_args=None, is_property=False,
-                 set_eth_method=None, eth_variant=None):
+    def __init__(
+        self,
+        args=(),
+        return_type="",
+        eth_method=None,
+        adapt_args=None,
+        is_property=False,
+        set_eth_method=None,
+        eth_variant=None,
+    ):
         self.eth_method = eth_method
         self.set_eth_method = set_eth_method
         self.return_type = return_type
@@ -76,8 +90,8 @@ class MethodAdapter:
 
     @staticmethod
     def snake_to_camel(name):
-        components = name.split('_')
-        return components[0] + ''.join(x.title() for x in components[1:])
+        components = name.split("_")
+        return components[0] + "".join(x.title() for x in components[1:])
 
     @property
     def method_name(self):
@@ -85,8 +99,7 @@ class MethodAdapter:
 
     def __get__(self, instance, owner=None):
         eth_call = instance.eth_call(
-            self.eth_method, self.args, self.return_type, self.adapt_args,
-            eth_variant=self.eth_variant
+            self.eth_method, self.args, self.return_type, self.adapt_args, eth_variant=self.eth_variant
         )
         if self.is_property:
             return eth_call(instance)
@@ -95,7 +108,7 @@ class MethodAdapter:
     def __set__(self, instance, value):
         if not self.is_property:
             raise NotImplementedError()
-        eth_call = instance.eth_call(self.set_eth_method, (("new_value", self.return_type), ))
+        eth_call = instance.eth_call(self.set_eth_method, (("new_value", self.return_type),))
         return eth_call(instance, value)
 
 
@@ -147,7 +160,7 @@ class ETHCall(ABC):
 
     def __call__(self, wrapper, *args, **kwargs):
         call_args = []
-        msg_args = {}
+        msg_args = wrapper.provider.tx_kwargs.copy()
 
         if self.adapt_args:
             args, kwargs = self.adapt_args(args, kwargs)
@@ -203,22 +216,26 @@ class ETHCall(ABC):
         return call_args, msg_args
 
     @classmethod
-    def _parse_keccak256(cls, value):
-        from Crypto.Hash import keccak  # To avoid import of wrappers breaks if keccak not installed
-        if value.startswith("0x"):
+    def _parse_keccak256(cls, value) -> HexBytes:
+        from Crypto.Hash import (
+            keccak,  # To avoid import of wrappers breaks if keccak not installed
+        )
+
+        if isinstance(value, HexBytes):
             return value
+
+        if value.startswith("0x"):
+            return HexBytes(value)
         k = keccak.new(digest_bits=256)
         k.update(value.encode("utf-8"))
-        return k.hexdigest()
+        return HexBytes(k.hexdigest())
 
     @classmethod
     def unparse(cls, wrapper, value_type, value):
         if value_type.startswith("(") and value_type.endswith(")"):
             # It's a tuple / struct
             value_types = [t.strip() for t in value_type.strip("()").split(",")]
-            return tuple(
-                cls.unparse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
-            )
+            return tuple(cls.unparse(wrapper, vt, value[i]) for i, vt in enumerate(value_types))
         if value_type == "amount":
             return AMOUNT_CLASS(value)
         if value_type == "ray":
@@ -240,6 +257,8 @@ class ETHCall(ABC):
 
 
 class BaseProvider(ABC):
+    tx_kwargs = {}
+
     @abstractmethod
     def get_contract_factory(self, eth_contract):
         raise NotImplementedError()
@@ -259,8 +278,9 @@ class BaseProvider(ABC):
             return 0
         address = self.get_contract_address(eth_wrapper)
         url = (
-            etherscan_url + f"&module=account&action=txlist&address={address}&startblock=0&" +
-            "endblock=99999999&page=1&offset=10&sort=asc"
+            etherscan_url
+            + f"&module=account&action=txlist&address={address}&startblock=0&"
+            + "endblock=99999999&page=1&offset=10&sort=asc"
         )
         resp = requests.get(url)
         resp.raise_for_status()
@@ -305,9 +325,9 @@ class ETHWrapper:
         else:
             if self.constructor_args:
                 constructor_params, transaction_kwargs = self.eth_call.parse_args(
-                    self, self.constructor_args, *init_params[:len(self.constructor_args)], **kwargs
+                    self, self.constructor_args, *init_params[: len(self.constructor_args)], **kwargs
                 )
-                init_params = init_params[len(self.constructor_args):]
+                init_params = init_params[len(self.constructor_args) :]
                 if transaction_kwargs:
                     kwargs.update(transaction_kwargs)
             else:
@@ -357,6 +377,31 @@ class ETHWrapper:
         obj._auto_from = obj.owner
         return obj
 
+    @classmethod
+    def build_from_def(cls, contract_def, extra_properties=None):
+        extra_properties = extra_properties or {}
+        attributes = {}
+        for item in contract_def.abi:
+            if item["type"] == "constructor":
+                attributes["constructor_args"] = tuple((arg["name"], arg["type"]) for arg in item["inputs"])
+            elif item["type"] == "function":
+                attributes[item["name"]] = MethodAdapter(
+                    args=tuple((arg["name"], arg["type"]) for arg in item["inputs"]),
+                    return_type=item["outputs"][0]["type"] if item["outputs"] else "",
+                    eth_method=item["name"],
+                    eth_variant=item["inputs"],
+                )
+        wrapper_class = type(
+            contract_def.contract_name,
+            (cls,),
+            {
+                "eth_contract": contract_def.contract_name,
+                **attributes,
+                **extra_properties,
+            },
+        )
+        return wrapper_class
+
     @property
     def contract_id(self):
         return self.contract.address
@@ -371,8 +416,8 @@ class ETHWrapper:
     revoke_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
     renounce_role = MethodAdapter((("role", "keccak256"), ("user", "address")))
     has_role = MethodAdapter((("role", "keccak256"), ("user", "address")), "bool")
-    get_role_admin = MethodAdapter((("role", "keccak256"), ), "address")
-    get_role_admin = MethodAdapter((("role", "keccak256"), ), "bytes32")
+    get_role_admin = MethodAdapter((("role", "keccak256"),), "address")
+    get_role_admin = MethodAdapter((("role", "keccak256"),), "bytes32")
 
     @contextmanager
     def as_(self, user):
@@ -397,14 +442,15 @@ class IERC20(ETHWrapper):
     symbol = MethodAdapter((), "string", is_property=True)
     decimals = MethodAdapter((), "int", is_property=True)
     total_supply = MethodAdapter((), "amount")
-    balance_of = MethodAdapter((("account", "address"), ), "amount")
-    transfer = MethodAdapter((
-        ("sender", "msg.sender"), ("recipient", "address"), ("amount", "amount")
-    ), "receipt")
+    balance_of = MethodAdapter((("account", "address"),), "amount")
+    transfer = MethodAdapter(
+        (("sender", "msg.sender"), ("recipient", "address"), ("amount", "amount")), "receipt"
+    )
 
     allowance = MethodAdapter((("owner", "address"), ("spender", "address")), "amount")
-    approve = MethodAdapter((("owner", "msg.sender"), ("spender", "address"), ("amount", "amount")),
-                            "receipt")
+    approve = MethodAdapter(
+        (("owner", "msg.sender"), ("spender", "address"), ("amount", "amount")), "receipt"
+    )
     increase_allowance = MethodAdapter(
         (("owner", "msg.sender"), ("spender", "address"), ("amount", "amount"))
     )
@@ -412,9 +458,10 @@ class IERC20(ETHWrapper):
         (("owner", "msg.sender"), ("spender", "address"), ("amount", "amount"))
     )
 
-    transfer_from = MethodAdapter((
-        ("spender", "msg.sender"), ("sender", "address"), ("recipient", "address"), ("amount", "amount")
-    ), "receipt")
+    transfer_from = MethodAdapter(
+        (("spender", "msg.sender"), ("sender", "address"), ("recipient", "address"), ("amount", "amount")),
+        "receipt",
+    )
 
 
 class IERC721(ETHWrapper):
@@ -423,19 +470,21 @@ class IERC721(ETHWrapper):
     name = MethodAdapter((), "string", is_property=True)
     symbol = MethodAdapter((), "string", is_property=True)
     total_supply = MethodAdapter((), "int")
-    balance_of = MethodAdapter((("account", "address"), ), "int")
-    owner_of = MethodAdapter((("token_id", "int"), ), "address")
-    approve = MethodAdapter((
-        ("sender", "msg.sender"), ("spender", "address"), ("token_id", "int")
-    ), "receipt")
-    get_approved = MethodAdapter((("token_id", "int"), ), "address")
-    set_approval_for_all = MethodAdapter((
-        ("sender", "msg.sender"), ("operator", "address"), ("approved", "bool")
-    ))
+    balance_of = MethodAdapter((("account", "address"),), "int")
+    owner_of = MethodAdapter((("token_id", "int"),), "address")
+    approve = MethodAdapter(
+        (("sender", "msg.sender"), ("spender", "address"), ("token_id", "int")), "receipt"
+    )
+    get_approved = MethodAdapter((("token_id", "int"),), "address")
+    set_approval_for_all = MethodAdapter(
+        (("sender", "msg.sender"), ("operator", "address"), ("approved", "bool"))
+    )
     is_approved_for_all = MethodAdapter((("owner", "address"), ("operator", "address")), "bool")
-    transfer_from = MethodAdapter((
-        ("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")
-    ), "receipt")
-    safe_transfer_from = MethodAdapter((
-        ("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")
-    ), "receipt", eth_variant="address, address, uint256")
+    transfer_from = MethodAdapter(
+        (("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")), "receipt"
+    )
+    safe_transfer_from = MethodAdapter(
+        (("spender", "msg.sender"), ("from", "address"), ("to", "address"), ("token_id", "int")),
+        "receipt",
+        eth_variant="address, address, uint256",
+    )

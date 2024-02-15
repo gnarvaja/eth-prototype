@@ -1,15 +1,27 @@
 import os
-import json
-from .contracts import RevertError
-from .wrappers import (
-    ETHCall, AddressBook, MAXUINT256, ETHWrapper, SKIP_PROXY, register_provider, BaseProvider
-)
+from collections import defaultdict
+from typing import Iterator, List, Union
+
 from environs import Env
 from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
+from eth_utils.abi import event_abi_to_log_topic
+from hexbytes import HexBytes
+from web3.contract import Contract
 from web3.exceptions import ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
-from eth_event import get_topic_map, decode_logs
+
+from .build_artifacts import ArtifactLibrary
+from .contracts import RevertError
+from .wrappers import (
+    MAXUINT256,
+    SKIP_PROXY,
+    AddressBook,
+    BaseProvider,
+    ETHCall,
+    ETHWrapper,
+    register_provider,
+)
 
 env = Env()
 
@@ -20,17 +32,21 @@ W3_ADDRESS_BOOK_CREATE_UNKNOWN = env.str("W3_ADDRESS_BOOK_CREATE_UNKNOWN", "")
 W3_POA = env.str("W3_POA", "auto")
 
 
+# TODO: This should probably be part of the AddressBook
+_contract_map = {}  # Address -> Contract
+
+
 class W3TimeControl:
     def __init__(self, w3):
         self.w3 = w3
 
     def fast_forward(self, secs):
-        self.w3.provider.make_request("evm_increaseTime", [secs])
-        # Not tested!
+        """Mines a new block whose timestamp is secs after the latest block's timestamp."""
+        self.w3.provider.make_request("evm_mine", [self.now + secs])
 
     @property
     def now(self):
-        return self.w3.get_block("latest").timestamp
+        return self.w3.eth.get_block("latest").timestamp
 
 
 def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
@@ -42,6 +58,7 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
 
     if tester:
         from web3 import Web3
+
         w3 = Web3(Web3.EthereumTesterProvider())
     else:
         from web3.auto import w3
@@ -81,12 +98,16 @@ def transact(provider, function, tx_kwargs):
             from_ = provider.address_book.get_signer_account(from_)
             tx_kwargs["from"] = from_.address
         tx = function.buildTransaction(
-            {**tx_kwargs, **{"nonce": provider.w3.eth.get_transaction_count(from_.address)}}
+            {
+                **tx_kwargs,
+                **{"nonce": provider.w3.eth.get_transaction_count(from_.address)},
+            }
         )
         signed_tx = from_.sign_transaction(tx)
         tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
     elif W3_TRANSACT_MODE == "defender-async":
         from .defender_relay import send_transaction
+
         tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
         tx = function.buildTransaction(tx_kwargs)
         return send_transaction(tx)
@@ -108,11 +129,11 @@ class W3AddressBook(AddressBook):
         return self._eth_accounts
 
     def get_account(self, name):
-        if isinstance(name, (Account, LocalAccount)):
+        if isinstance(name, BaseAccount):
             return name
         if name is None:
             return self.ZERO
-        if type(name) == str and name.startswith("0x"):
+        if isinstance(name, str) and name.startswith("0x"):
             return name
         if name not in self.name_to_address:
             self.last_account_used += 1
@@ -120,10 +141,15 @@ class W3AddressBook(AddressBook):
                 self.name_to_address[name] = self.eth_accounts[self.last_account_used]
             except IndexError:
                 self.name_to_address[name] = self.w3.eth.account.create().address
+                # TODO: This branch only generates a random account and discards the private key. Unlike the accounts in
+                # self.eth_accounts this one is not unlocked on the node. Something like this is necessary for this to
+                # be useful (and consistent with other branches):
+                # self.provider.register_account(address, private_key)
+
         return self.name_to_address[name]
 
     def get_name(self, account_or_address):
-        if isinstance(account_or_address, (LocalAccount, )):
+        if isinstance(account_or_address, (LocalAccount,)):
             account_or_address = account_or_address.address
 
         for name, addr in self.name_to_address.items():
@@ -151,7 +177,7 @@ class W3EnvAddressBook(AddressBook):
                 continue
             if k.endswith("_ADDR"):
                 continue  # Addresses linked to names
-            addr = k[len(env_prefix):]
+            addr = k[len(env_prefix) :]
             if addr.startswith("0x"):
                 account = w3.account.from_key(value)
                 assert account.address == addr
@@ -183,7 +209,7 @@ class W3EnvAddressBook(AddressBook):
         raise RuntimeError(f"No account found for name {name}")
 
     def get_name(self, account_or_address):
-        if isinstance(account_or_address, (LocalAccount, )):
+        if isinstance(account_or_address, (LocalAccount,)):
             account_or_address = account_or_address.address
 
         for name, addr in self.name_to_address.items():
@@ -205,23 +231,103 @@ class ReceiptWrapper:
     @property
     def events(self):
         if not hasattr(self, "_events"):
-            topic_map = get_topic_map(self._contract.abi)
-            logs = decode_logs(self._receipt.logs, topic_map, allow_undecoded=True)
-            evts = {}
-            for evt in logs:
-                evt_name = evt["name"]
-                evt_params = dict((d["name"], d["value"]) for d in evt["data"])
-                if evt_name not in evts:
-                    evts[evt_name] = evt_params
-                elif type(evts[evt_name]) == dict:
-                    evts[evt_name] = [evts[evt_name], evt_params]  # start a list
-                else:  # it's already a list
-                    evts[evt_name].append(evt_params)
-            self._events = evts
+            # Lookup the events in all known contracts
+            addresses = [log.address for log in self._receipt.logs]
+            contracts = {addr: _contract_map[addr] for addr in addresses if addr in _contract_map}
+            topic_map = {
+                HexBytes(event_abi_to_log_topic(event().abi)): event()
+                for contract in contracts.values()
+                for event in contract.events
+            }
+
+            parsed_logs = []
+            for log in self._receipt.logs:
+                for topic in log.topics:
+                    if topic in topic_map:
+                        parsed_logs += topic_map[topic].process_receipt(self._receipt)
+
+            evts = defaultdict(list)
+            for evt in parsed_logs:
+                evt_name = evt.event
+                evt_params = evt.args
+                evts[evt_name].append(evt_params)
+            self._events = {k: EventItem(k, v) for k, v in evts.items()}
         return self._events
 
     def __getattr__(self, attr_name):
         return getattr(self._receipt, attr_name)
+
+
+class EventItem:
+    """
+    Dict/list hybrid container, represents one or more events with the same name
+    that were fired in a transaction.
+
+    Inspired on eth-brownies brownie.network.event._EventItem class
+    """
+
+    def __init__(self, name: str, events: List) -> None:
+        self.name = name
+        self._events = events
+
+    def __getitem__(self, key: Union[int, str]) -> List:
+        """if key is int: returns the n'th event that was fired with this name
+        if key is str: returns the value of data field 'key' from the 1st event
+        within the container"""
+        if not isinstance(key, (int, str)):
+            raise TypeError(f"Invalid key type '{type(key)}' - can only use strings or integers")
+        if isinstance(key, int):
+            try:
+                return self._events[key]
+            except IndexError:
+                raise IndexError(
+                    f"Index {key} out of range - only {len(self._ordered)} '{self.name}' events fired"
+                )
+        if key in self._events[0]:
+            return self._events[0][key]
+        if f"{key} (indexed)" in self._events[0]:
+            return self._events[0][f"{key} (indexed)"]
+        valid_keys = ", ".join(self.keys())
+        raise KeyError(f"Unknown key '{key}' - the '{self.name}' event includes these keys: {valid_keys}")
+
+    def __contains__(self, name: str) -> bool:
+        """returns True if this event contains a value with the given name."""
+        return name in self._events[0]
+
+    def __len__(self) -> int:
+        """returns the number of events held in this container."""
+        return len(self._events)
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        if len(self._events) == 1:
+            return str(self._events[0])
+        return str([i[0] for i in self._events])
+
+    def __iter__(self) -> Iterator:
+        return iter(self._events)
+
+    def __eq__(self, other: object) -> bool:
+        if len(self._events) == 1:
+            if isinstance(other, (tuple, list)):
+                # sequences compare directly against the event values
+                return self._events[0].values() == other
+            return other == self._events[0]
+        return other == self._events
+
+    def items(self) -> List:
+        """EventItem.items() -> a list object providing a view on EventItem[0]'s items"""
+        return [(i, self[i]) for i in self.keys()]
+
+    def keys(self) -> List:
+        """EventItem.keys() -> a list object providing a view on EventItem[0]'s keys"""
+        return [i.replace(" (indexed)", "") for i in self._events[0].keys()]
+
+    def values(self) -> List:
+        """EventItem.values() -> a list object providing a view on EventItem[0]'s values"""
+        return self._events[0].values()
 
 
 class W3ETHCall(ETHCall):
@@ -238,11 +344,14 @@ class W3ETHCall(ETHCall):
         function = getattr(wrapper.contract.functions, eth_method)  # TODO: eth_variant
         function_abi = cls.find_function_abi(wrapper.contract, eth_method, eth_variant)
         if function_abi["stateMutability"] in ("pure", "view"):
+
             def eth_function(*args):
                 if args and type(args[-1]) == dict:
                     args = args[:-1]  # remove dict with {from: ...}
                 return function(*args).call()
+
         else:  # Mutable function, need to send and wait transaction
+
             def eth_function(*args):
                 if args and type(args[-1]) == dict:
                     transact_args = args[-1]
@@ -255,12 +364,12 @@ class W3ETHCall(ETHCall):
 
     def normalize_receipt(self, wrapper, receipt):
         if W3_TRANSACT_MODE == "defender-async":
-            return receipt  # Don't do anything because the receipt it's just a dict of not-yet-mined tx
+            return receipt  # Don't do anything because the receipt is just a dict of not-yet-mined tx
         return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):
         if str(err).startswith("execution reverted: "):
-            raise RevertError(str(err)[len("execution reverted: "):])
+            raise RevertError(str(err)[len("execution reverted: ") :])
         super()._handle_exception(err)
 
     @classmethod
@@ -268,16 +377,14 @@ class W3ETHCall(ETHCall):
         if value_type.startswith("(") and value_type.endswith(")"):
             # It's a tuple / struct
             value_types = [t.strip() for t in value_type.split(",")]
-            return tuple(
-                cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types)
-            )
+            return tuple(cls.parse(wrapper, vt, value[i]) for i, vt in enumerate(value_types))
         if value_type == "address":
-            if isinstance(value, (LocalAccount, Account)):
-                return value
-#            elif isinstance(value, (Contract, ProjectContract)):
-#                return value.address
+            if isinstance(value, BaseAccount):
+                return value.address
             elif isinstance(value, ETHWrapper):
                 return value.contract.address
+            elif isinstance(value, Contract):
+                return value.address
             elif isinstance(value, str) and value.startswith("0x"):
                 return value
             return wrapper.provider.address_book.get_account(value)
@@ -299,30 +406,19 @@ class W3Provider(BaseProvider):
 
     def __init__(self, w3, address_book=None, contracts_path=None, tx_kwargs=None):
         self.w3 = w3
-        self.contracts_path = contracts_path or CONTRACT_JSON_PATH
-        self.contract_def_cache = {}
+        self.artifact_library = ArtifactLibrary(
+            *(contracts_path if contracts_path is not None else CONTRACT_JSON_PATH)
+        )
         self.address_book = address_book or W3AddressBook(w3)
         self.time_control = W3TimeControl(w3)
         self.tx_kwargs = tx_kwargs or {}
 
     def get_contract_def(self, eth_contract):
-        if eth_contract not in self.contract_def_cache:
-            json_file = None
-            for contract_path in self.contracts_path:
-                for sub_path, _, files in os.walk(contract_path):
-                    if f"{eth_contract}.json" in files:
-                        json_file = os.path.join(sub_path, f"{eth_contract}.json")
-                        break
-                if json_file is not None:
-                    break
-            else:
-                raise RuntimeError(f"{eth_contract} JSON definition not found in {self.contracts_path}")
-            self.contract_def_cache[eth_contract] = json.load(open(json_file))
-        return self.contract_def_cache[eth_contract]
+        return self.artifact_library.get_artifact_by_name(eth_contract)
 
     def get_contract_factory(self, eth_contract):
         contract_def = self.get_contract_def(eth_contract)
-        return self.w3.eth.contract(abi=contract_def["abi"], bytecode=contract_def.get("bytecode", None))
+        return self.w3.eth.contract(abi=contract_def.abi, bytecode=contract_def.bytecode)
 
     def deploy(self, eth_contract, init_params, from_, **kwargs):
         factory = self.get_contract_factory(eth_contract)
@@ -358,49 +454,58 @@ class W3Provider(BaseProvider):
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
         eth_wrapper.owner = self.address_book.get_account(owner)
-        assert not eth_wrapper.libraries_required, "Not supported"
 
-        eth_contract = self.get_contract_factory(eth_wrapper.eth_contract)
+        contract_def = self.get_contract_def(eth_wrapper.eth_contract)
+        libraries = {}
+        for lib, _ in contract_def.libraries():
+            if lib not in libraries:
+                library_def = self.get_contract_factory(lib)
+                library = self.construct(library_def)
+                libraries[lib] = library.address
+
+        if libraries:
+            contract_def = contract_def.link(libraries)
+
+        eth_contract = self.w3.eth.contract(abi=contract_def.abi, bytecode=contract_def.bytecode)
+
         if eth_wrapper.proxy_kind is None:
             eth_wrapper.contract = self.construct(eth_contract, init_params, {"from": eth_wrapper.owner})
         elif eth_wrapper.proxy_kind == "uups" and not SKIP_PROXY:
             constructor_params, init_params = init_params
             real_contract = self.construct(eth_contract, constructor_params, {"from": eth_wrapper.owner})
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
-            init_data = real_contract.functions.initialize(
-                *init_params
-            ).build_transaction({**self.tx_kwargs, **{"from": eth_wrapper.owner}})["data"]
+            init_data = eth_contract.encodeABI(fn_name="initialize", args=init_params)
             proxy_contract = self.construct(
                 ERC1967Proxy,
                 (real_contract.address, init_data),
-                {**self.tx_kwargs, **{"from": eth_wrapper.owner}}
+                {**self.tx_kwargs, **{"from": eth_wrapper.owner}},
             )
-            eth_wrapper.contract = self.w3.eth.contract(
-                abi=eth_contract.abi,
-                address=proxy_contract.address
-            )
+            eth_wrapper.contract = self.w3.eth.contract(abi=eth_contract.abi, address=proxy_contract.address)
         elif eth_wrapper.proxy_kind == "uups" and SKIP_PROXY:
             constructor_params, init_params = init_params
-            eth_wrapper.contract = self.construct(eth_contract, constructor_params,
-                                                  {"from": eth_wrapper.owner})
+            eth_wrapper.contract = self.construct(
+                eth_contract, constructor_params, {"from": eth_wrapper.owner}
+            )
             transact(
                 self,
                 eth_wrapper.contract.functions.initialize(*init_params),
-                {"from": eth_wrapper.owner}
+                {"from": eth_wrapper.owner},
             )
+
+        _contract_map[eth_wrapper.contract.address] = eth_wrapper.contract
 
     def construct(self, contract_factory, constructor_args=(), transact_kwargs={}):
         try:
-            receipt = transact(
-                self,
-                contract_factory.constructor(*constructor_args),
-                transact_kwargs
-            )
+            receipt = transact(self, contract_factory.constructor(*constructor_args), transact_kwargs)
         except Exception as err:
             if str(err).startswith("execution reverted: "):
-                raise RevertError(str(err)[len("execution reverted: "):])
+                raise RevertError(str(err)[len("execution reverted: ") :])
             raise
         return self.w3.eth.contract(abi=contract_factory.abi, address=receipt.contractAddress)
 
     def build_contract(self, contract_address, contract_factory, contract_name=None):
         return self.w3.eth.contract(abi=contract_factory.abi, address=contract_address)
+
+    def unlock_account(self, address):
+        """Unlocks an account on the node. Assumes hardhat network API."""
+        self.w3.provider.make_request("hardhat_impersonateAccount", [address])
