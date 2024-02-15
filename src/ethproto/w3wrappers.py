@@ -372,10 +372,6 @@ class W3ETHCall(ETHCall):
             raise RevertError(str(err)[len("execution reverted: ") :])
         super()._handle_exception(err)
 
-    def _get_msg_args(self):
-        # TODO: This needs to be zero for test runs, but forcing it to zero like this will break other clients
-        return {"gasPrice": 0}
-
     @classmethod
     def parse(cls, wrapper, value_type, value):
         if value_type.startswith("(") and value_type.endswith(")"):

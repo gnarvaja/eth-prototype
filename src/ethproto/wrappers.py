@@ -158,12 +158,9 @@ class ETHCall(ABC):
     def _handle_exception(self, err):
         raise err
 
-    def _get_msg_args(self):
-        return {}
-
     def __call__(self, wrapper, *args, **kwargs):
         call_args = []
-        msg_args = self._get_msg_args()
+        msg_args = wrapper.provider.tx_kwargs.copy()
 
         if self.adapt_args:
             args, kwargs = self.adapt_args(args, kwargs)
@@ -260,6 +257,8 @@ class ETHCall(ABC):
 
 
 class BaseProvider(ABC):
+    tx_kwargs = {}
+
     @abstractmethod
     def get_contract_factory(self, eth_contract):
         raise NotImplementedError()
