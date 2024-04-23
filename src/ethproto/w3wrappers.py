@@ -8,7 +8,7 @@ from eth_account.signers.base import BaseAccount
 from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.contract import Contract
-from web3.exceptions import ExtraDataLengthError
+from web3.exceptions import ContractLogicError, ExtraDataLengthError
 from web3.middleware import geth_poa_middleware
 
 from .build_artifacts import ArtifactLibrary
@@ -97,7 +97,7 @@ def transact(provider, function, tx_kwargs):
         else:  # it's a string, I try to get the PK from the environment
             from_ = provider.address_book.get_signer_account(from_)
             tx_kwargs["from"] = from_.address
-        tx = function.buildTransaction(
+        tx = function.build_transaction(
             {
                 **tx_kwargs,
                 **{"nonce": provider.w3.eth.get_transaction_count(from_.address)},
@@ -109,7 +109,7 @@ def transact(provider, function, tx_kwargs):
         from .defender_relay import send_transaction
 
         tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
-        tx = function.buildTransaction(tx_kwargs)
+        tx = function.build_transaction(tx_kwargs)
         return send_transaction(tx)
 
     return provider.w3.eth.wait_for_transaction_receipt(tx_hash)
@@ -368,8 +368,12 @@ class W3ETHCall(ETHCall):
         return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):
-        if str(err).startswith("execution reverted: "):
-            raise RevertError(str(err)[len("execution reverted: ") :])
+        if isinstance(err, ContractLogicError):
+            raise RevertError(
+                err.message[len("execution reverted: ") :]
+                if err.message and err.message.startswith("execution reverted: ")
+                else err.message
+            )
         super()._handle_exception(err)
 
     @classmethod
