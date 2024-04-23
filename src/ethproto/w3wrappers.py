@@ -97,7 +97,7 @@ def transact(provider, function, tx_kwargs):
         else:  # it's a string, I try to get the PK from the environment
             from_ = provider.address_book.get_signer_account(from_)
             tx_kwargs["from"] = from_.address
-        tx = function.buildTransaction(
+        tx = function.build_transaction(
             {
                 **tx_kwargs,
                 **{"nonce": provider.w3.eth.get_transaction_count(from_.address)},
@@ -109,7 +109,7 @@ def transact(provider, function, tx_kwargs):
         from .defender_relay import send_transaction
 
         tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
-        tx = function.buildTransaction(tx_kwargs)
+        tx = function.build_transaction(tx_kwargs)
         return send_transaction(tx)
 
     return provider.w3.eth.wait_for_transaction_receipt(tx_hash)

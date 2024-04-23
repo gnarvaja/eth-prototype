@@ -49,10 +49,6 @@ def auto_register_provider(provider_key):
         from .w3wrappers import register_w3_provider
 
         register_w3_provider()
-    elif provider_key == "brownie":
-        from .brwrappers import BrownieProvider
-
-        register_provider("brownie", BrownieProvider())
     else:
         raise RuntimeError(f"Unknown provider {provider_key}")
 
