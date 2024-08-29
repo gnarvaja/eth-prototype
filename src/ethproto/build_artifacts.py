@@ -1,6 +1,5 @@
 """Helper classes to use hardhat build artifacts from python"""
 
-
 import json
 import os
 import os.path
@@ -26,17 +25,15 @@ class Artifact:
         self.abi = kwargs["abi"]
         self.bytecode = kwargs["bytecode"]
         self.deployed_bytecode = kwargs["deployedBytecode"]
-        self.link_references = kwargs["linkReferences"]
-        self.deployed_link_references = kwargs["deployedLinkReferences"]
+        self.link_references = kwargs.get("linkReferences", {})
+        self.deployed_link_references = kwargs.get("deployedLinkReferences", {})
 
     def link(self, libraries: dict) -> "Artifact":
         """Returns a new artifact with the external libraries linked
 
         Libraries is a dictionary of the form {library_name: address}
         """
-        bytecode = self._replace_link_references(
-            self.bytecode, self.link_references, libraries
-        )
+        bytecode = self._replace_link_references(self.bytecode, self.link_references, libraries)
         deployed_bytecode = self._replace_link_references(
             self.deployed_bytecode, self.deployed_link_references, libraries
         )
@@ -55,9 +52,7 @@ class Artifact:
             for lib in libs.keys():
                 yield lib, source
 
-    def _replace_link_references(
-        self, bytecode: str, link_references: dict, libraries: dict
-    ) -> str:
+    def _replace_link_references(self, bytecode: str, link_references: dict, libraries: dict) -> str:
         # remove 0x prefix if present
         bytecode = bytecode[2:] if bytecode.startswith("0x") else bytecode
 
@@ -115,17 +110,13 @@ class ArtifactLibrary:
 
         if contract not in self._fullpath_cache:
             for path in self.lookup_paths:
-                build_artifact_path = (
-                    path / contract / contract.with_suffix(".json").name
-                )
+                build_artifact_path = path / contract / contract.with_suffix(".json").name
                 if build_artifact_path.exists():
                     with open(build_artifact_path) as f:
                         self._fullpath_cache[contract] = Artifact(**json.load(f))
 
             if contract not in self._fullpath_cache:
-                raise FileNotFoundError(
-                    f"Could not find artifact for {contract} on {self.lookup_paths}"
-                )
+                raise FileNotFoundError(f"Could not find artifact for {contract} on {self.lookup_paths}")
 
         return self._fullpath_cache[contract]
 
@@ -145,8 +136,6 @@ class ArtifactLibrary:
                             self._name_cache[contract_name] = Artifact(**json.load(f))
 
             if contract_name not in self._name_cache:
-                raise FileNotFoundError(
-                    f"Could not find artifact for {contract_name} on {self.lookup_paths}"
-                )
+                raise FileNotFoundError(f"Could not find artifact for {contract_name} on {self.lookup_paths}")
 
         return self._name_cache[contract_name]

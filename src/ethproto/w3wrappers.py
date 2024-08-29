@@ -111,6 +111,14 @@ def transact(provider, function, tx_kwargs):
         tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
         tx = function.build_transaction(tx_kwargs)
         return send_transaction(tx)
+    elif W3_TRANSACT_MODE == "aa-bundler-async":
+        from .aa_bundler import send_transaction
+
+        tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
+        tx = function.build_transaction(tx_kwargs)
+        return send_transaction(provider.w3, tx)
+    else:
+        raise RuntimeError(f"Unknown W3_TRANSACT_MODE {W3_TRANSACT_MODE}")
 
     return provider.w3.eth.wait_for_transaction_receipt(tx_hash)
 
