@@ -108,13 +108,15 @@ def transact(provider, function, tx_kwargs):
     elif W3_TRANSACT_MODE == "defender-async":
         from .defender_relay import send_transaction
 
-        tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
+        tx_kwargs |= provider.tx_kwargs
         tx = function.build_transaction(tx_kwargs)
         return send_transaction(tx)
     elif W3_TRANSACT_MODE == "aa-bundler-async":
         from .aa_bundler import send_transaction
 
-        tx_kwargs = {**provider.tx_kwargs, **tx_kwargs}
+        tx_kwargs |= provider.tx_kwargs
+        # To avoid fetching gas and gasPrice in a standard way, when it's not relevant for user ops
+        tx_kwargs.update(dict(gas=0, gasPrice=0))
         tx = function.build_transaction(tx_kwargs)
         return send_transaction(provider.w3, tx)
     else:
