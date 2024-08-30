@@ -375,6 +375,8 @@ class W3ETHCall(ETHCall):
     def normalize_receipt(self, wrapper, receipt):
         if W3_TRANSACT_MODE == "defender-async":
             return receipt  # Don't do anything because the receipt is just a dict of not-yet-mined tx
+        elif W3_TRANSACT_MODE == "aa-bundler-async":
+            return receipt  # Don't do anything because the receipt is just a dict of {"userOpHash": "..."}
         return ReceiptWrapper(receipt, wrapper.contract)
 
     def _handle_exception(self, err):

@@ -1,3 +1,4 @@
+import os
 from hexbytes import HexBytes
 from ethproto import aa_bundler
 from web3.constants import HASH_ZERO
@@ -175,6 +176,7 @@ def test_get_nonce_with_local_cache(fetch_nonce_mock, randint_mock):
         fetch_nonce_mock.assert_not_called()
 
 
+@patch.object(aa_bundler, "AA_BUNDLER_NONCE_MODE", new=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE)
 @patch.object(aa_bundler, "get_base_fee")
 def test_send_transaction(get_base_fee_mock):
     get_base_fee_mock.return_value = 0
@@ -239,4 +241,4 @@ def test_send_transaction(get_base_fee_mock):
     ret = aa_bundler.send_transaction(w3, tx)
     get_base_fee_mock.assert_called_once_with(w3)
     assert aa_bundler.NONCE_CACHE[0] == 1
-    assert ret == "0xa950a17ca1ed83e974fb1aa227360a007cb65f566518af117ffdbb04d8d2d524"
+    assert ret == {"userOpHash": "0xa950a17ca1ed83e974fb1aa227360a007cb65f566518af117ffdbb04d8d2d524"}

@@ -8,6 +8,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from hexbytes import HexBytes
 from web3 import Web3
+from web3.constants import ADDRESS_ZERO
 from .contracts import RevertError
 
 
@@ -17,6 +18,9 @@ AA_BUNDLER_SENDER = env.str("AA_BUNDLER_SENDER", None)
 AA_BUNDLER_ENTRYPOINT = env.str("AA_BUNDLER_ENTRYPOINT", "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
 AA_BUNDLER_EXECUTOR_PK = env.str("AA_BUNDLER_EXECUTOR_PK", None)
 AA_BUNDLER_PROVIDER = env.str("AA_BUNDLER_PROVIDER", "alchemy")
+AA_BUNDLER_GAS_LIMIT_FACTOR = env.float("AA_BUNDLER_GAS_LIMIT_FACTOR", 1)
+AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR", 1)
+AA_BUNDLER_BASE_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_BASE_GAS_PRICE_FACTOR", 1)
 
 NonceMode = Enum(
     "NonceMode",
@@ -147,7 +151,7 @@ def get_nonce_and_key(w3, tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fet
 
     if nonce is None:
         if fetch or nonce_mode == NonceMode.FIXED_KEY_FETCH_ALWAYS:
-            nonce = fetch_nonce(w3, tx.get("from", AA_BUNDLER_SENDER), entry_point, nonce_key)
+            nonce = fetch_nonce(w3, get_sender(tx), entry_point, nonce_key)
         elif nonce_key not in NONCE_CACHE:
             nonce = 0
         else:
@@ -168,7 +172,16 @@ def handle_response_error(resp, w3, tx, retry_nonce):
 
 def get_base_fee(w3):
     blk = w3.eth.get_block("latest")
-    return blk["baseFeePerGas"]
+    return int(_to_uint(blk["baseFeePerGas"]) * AA_BUNDLER_BASE_GAS_PRICE_FACTOR)
+
+
+def get_sender(tx):
+    if "from" not in tx or tx["from"] == ADDRESS_ZERO:
+        if AA_BUNDLER_SENDER is None:
+            raise RuntimeError("Must define AA_BUNDLER_SENDER or send 'from' in the TX")
+        return AA_BUNDLER_SENDER
+    else:
+        return tx["from"]
 
 
 def send_transaction(w3, tx, retry_nonce=None):
@@ -185,7 +198,7 @@ def send_transaction(w3, tx, retry_nonce=None):
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
     )
     user_operation = {
-        "sender": tx.get("from", AA_BUNDLER_SENDER),
+        "sender": get_sender(tx),
         "nonce": hex(make_nonce(nonce_key, nonce)),
         "callData": call_data,
         "signature": dummy_signature,
@@ -203,9 +216,12 @@ def send_transaction(w3, tx, retry_nonce=None):
         resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
         if "error" in resp:
             raise RevertError(resp["error"]["message"])
-        max_priority_fee_per_gas = resp["result"]
-        user_operation["maxPriorityFeePerGas"] = max_priority_fee_per_gas
-        user_operation["maxFeePerGas"] = hex(_to_uint(max_priority_fee_per_gas) + _to_uint(get_base_fee(w3)))
+        max_priority_fee_per_gas = int(_to_uint(resp["result"]) * AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
+        user_operation["maxPriorityFeePerGas"] = hex(max_priority_fee_per_gas)
+        user_operation["maxFeePerGas"] = hex(max_priority_fee_per_gas + get_base_fee(w3))
+        user_operation["callGasLimit"] = hex(
+            int(_to_uint(user_operation["callGasLimit"]) * AA_BUNDLER_GAS_LIMIT_FACTOR)
+        )
     elif AA_BUNDLER_PROVIDER == "gelato":
         user_operation.update(
             {
@@ -231,4 +247,4 @@ def send_transaction(w3, tx, retry_nonce=None):
 
     # Store nonce in the cache, so next time uses a new nonce
     NONCE_CACHE[nonce_key] = nonce + 1
-    return resp["result"]
+    return {"userOpHash": resp["result"]}
