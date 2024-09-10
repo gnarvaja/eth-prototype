@@ -1,8 +1,9 @@
-import os
-from hexbytes import HexBytes
-from ethproto import aa_bundler
-from web3.constants import HASH_ZERO
 from unittest.mock import MagicMock, patch
+
+from hexbytes import HexBytes
+from web3.constants import HASH_ZERO
+
+from ethproto import aa_bundler
 
 
 def test_pack_two():
@@ -59,16 +60,15 @@ def test_pack_user_operation():
 def test_hash_packed_user_operation():
     packed = aa_bundler.pack_user_operation(user_operation)
     hash = aa_bundler.hash_packed_user_operation_only(packed)
-    assert hash == "0xa2c19765d18b0d690c05b20061bd23d066201aff1833a51bd28af115fbd4bcd9"
+    assert hash == HexBytes("0xa2c19765d18b0d690c05b20061bd23d066201aff1833a51bd28af115fbd4bcd9")
     hash = aa_bundler.hash_packed_user_operation(packed, CHAIN_ID, ENTRYPOINT)
-    assert hash == "0xb365ad4d366e9081718e926912da7a78a2faae592286fda0cc11923bd141b7cf"
+    assert hash == HexBytes("0xb365ad4d366e9081718e926912da7a78a2faae592286fda0cc11923bd141b7cf")
 
 
 def test_sign_user_operation():
     signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation, CHAIN_ID, ENTRYPOINT)
-    assert (
-        signature
-        == "0xb9b872bfe4e90f4628e8ec24879a5b01045f91da8457f3ce2b417d2e5774b508261ec1147a820e75a141cb61b884a78d7e88996ceddafb9a7016cfe7a48a1f4f1b"  # noqa
+    assert signature == HexBytes(
+        "0xb9b872bfe4e90f4628e8ec24879a5b01045f91da8457f3ce2b417d2e5774b508261ec1147a820e75a141cb61b884a78d7e88996ceddafb9a7016cfe7a48a1f4f1b"  # noqa
     )
 
 
@@ -76,9 +76,8 @@ def test_sign_user_operation_gas_diff():
     user_operation_2 = dict(user_operation)
     user_operation_2["maxPriorityFeePerGas"] -= 1
     signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation_2, CHAIN_ID, ENTRYPOINT)
-    assert (
-        signature
-        == "0x8162479d2dbd18d7fe93a2f51e283021d6e4eae4f57d20cdd553042723a0b0ea690ab3903d45126b0047da08ab53dfdf86656e4f258ac4936ba96a759ccb77f61b"  # noqa
+    assert signature == HexBytes(
+        "0x8162479d2dbd18d7fe93a2f51e283021d6e4eae4f57d20cdd553042723a0b0ea690ab3903d45126b0047da08ab53dfdf86656e4f258ac4936ba96a759ccb77f61b"  # noqa
     )
 
 

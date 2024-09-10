@@ -9,7 +9,7 @@ from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.contract import Contract
 from web3.exceptions import ContractLogicError, ExtraDataLengthError
-from web3.middleware import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from .build_artifacts import ArtifactLibrary
 from .contracts import RevertError
@@ -68,9 +68,9 @@ def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
         try:
             w3.eth.get_block("latest")
         except ExtraDataLengthError:
-            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
     elif W3_POA == "yes":
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
     # If address_book not provided and there are envs with W3_ADDRESS_BOOK_PREFIX,
     # use W3EnvAddressBook
@@ -444,7 +444,7 @@ class W3Provider(BaseProvider):
     def get_events(self, eth_wrapper, event_name, filter_kwargs={}):
         """Returns a list of events given a filter, like this:
 
-        >>> provider.get_events(currencywrapper, "Transfer", dict(fromBlock=0))
+        >>> provider.get_events(currencywrapper, "Transfer", dict(from_block=0))
         [AttributeDict({
             'args': AttributeDict(
                 {'from': '0x0000000000000000000000000000000000000000',
@@ -463,8 +463,8 @@ class W3Provider(BaseProvider):
         """
         contract = eth_wrapper.contract
         event = getattr(contract.events, event_name)
-        if "fromBlock" not in filter_kwargs:
-            filter_kwargs["fromBlock"] = self.get_first_block(eth_wrapper)
+        if "from_block" not in filter_kwargs:
+            filter_kwargs["from_block"] = self.get_first_block(eth_wrapper)
         event_filter = event.create_filter(**filter_kwargs)
         return event_filter.get_all_entries()
 
@@ -490,7 +490,7 @@ class W3Provider(BaseProvider):
             constructor_params, init_params = init_params
             real_contract = self.construct(eth_contract, constructor_params, {"from": eth_wrapper.owner})
             ERC1967Proxy = self.get_contract_factory("ERC1967Proxy")
-            init_data = eth_contract.encodeABI(fn_name="initialize", args=init_params)
+            init_data = eth_contract.encode_abi(abi_element_identifier="initialize", args=init_params)
             proxy_contract = self.construct(
                 ERC1967Proxy,
                 (real_contract.address, init_data),

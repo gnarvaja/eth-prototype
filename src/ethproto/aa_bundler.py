@@ -1,16 +1,17 @@
 import random
-from warnings import warn
 from enum import Enum
-import requests
+from warnings import warn
+
 from environs import Env
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from eth_utils import add_0x_prefix
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
-from .contracts import RevertError
 
+from .contracts import RevertError
 
 env = Env()
 
@@ -55,8 +56,8 @@ RANDOM_NONCE_KEY = None
 
 
 def pack_two(a, b):
-    a = HexBytes(a).hex()[2:]
-    b = HexBytes(b).hex()[2:]
+    a = HexBytes(a).hex()
+    b = HexBytes(b).hex()
     return "0x" + a.zfill(32) + b.zfill(32)
 
 
@@ -102,23 +103,23 @@ def hash_packed_user_operation_only(packed_user_op):
                 hash_paymaster_and_data,
             ],
         ).hex()
-    ).hex()
+    )
 
 
 def hash_packed_user_operation(packed_user_op, chain_id, entry_point):
     return Web3.keccak(
         hexstr=encode(
             ["bytes32", "address", "uint256"],
-            [HexBytes(hash_packed_user_operation_only(packed_user_op)), entry_point, chain_id],
+            [hash_packed_user_operation_only(packed_user_op), entry_point, chain_id],
         ).hex()
-    ).hex()
+    )
 
 
 def sign_user_operation(private_key, user_operation, chain_id, entry_point):
     packed_user_op = pack_user_operation(user_operation)
     hash = hash_packed_user_operation(packed_user_op, chain_id, entry_point)
-    signature = Account.sign_message(encode_defunct(hexstr=hash), private_key)
-    return signature.signature.hex()
+    signature = Account.sign_message(encode_defunct(hexstr=hash.hex()), private_key)
+    return signature.signature
 
 
 def make_nonce(nonce_key, nonce):
@@ -232,8 +233,10 @@ def send_transaction(w3, tx, retry_nonce=None):
                 "maxPriorityFeePerGas": "0x00",
             }
         )
-    user_operation["signature"] = sign_user_operation(
-        AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
+    user_operation["signature"] = add_0x_prefix(
+        sign_user_operation(
+            AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
+        ).hex()
     )
     # Remove paymaster related fields
     user_operation.pop("paymaster", None)
