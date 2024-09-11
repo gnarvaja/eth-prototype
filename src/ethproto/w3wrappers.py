@@ -49,14 +49,21 @@ class W3TimeControl:
         return self.w3.eth.get_block("latest").timestamp
 
 
-def register_w3_provider(provider_key="w3", tester=None, provider_kwargs={}):
+def register_w3_provider(provider_key="w3", w3=None, tester=None, provider_kwargs=None):
+    if w3 is not None and tester is not None:
+        raise ValueError("Cannot inject w3 and use tester at the same time")
+
+    provider_kwargs = provider_kwargs or {}
     if tester is None:
         try:
             import eth_tester  # noqa
         except ImportError:
             tester = False
 
-    if tester:
+    if w3 is not None:
+        # the provided w3 instance takes precedence over all other args
+        pass
+    elif tester:
         from web3 import Web3
 
         w3 = Web3(Web3.EthereumTesterProvider())
