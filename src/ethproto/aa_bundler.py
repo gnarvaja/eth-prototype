@@ -23,6 +23,7 @@ AA_BUNDLER_PROVIDER = env.str("AA_BUNDLER_PROVIDER", "alchemy")
 AA_BUNDLER_GAS_LIMIT_FACTOR = env.float("AA_BUNDLER_GAS_LIMIT_FACTOR", 1)
 AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_BASE_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_BASE_GAS_PRICE_FACTOR", 1)
+AA_BUNDLER_VERIFICATION_GAS_FACTOR = env.float("AA_BUNDLER_VERIFICATION_GAS_FACTOR", 1)
 
 NonceMode = Enum(
     "NonceMode",
@@ -68,6 +69,10 @@ def _to_uint(x):
     elif isinstance(x, int):
         return x
     raise RuntimeError(f"Invalid int value {x}")
+
+
+def apply_factor(x, factor):
+    return int(_to_uint(x) * factor)
 
 
 def pack_user_operation(user_operation):
@@ -224,11 +229,11 @@ def build_user_operation(w3, tx, retry_nonce=None):
         resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
         if "error" in resp:
             raise RevertError(resp["error"]["message"])
-        max_priority_fee_per_gas = int(_to_uint(resp["result"]) * AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
+        max_priority_fee_per_gas = apply_factor(resp["result"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
         user_operation["maxPriorityFeePerGas"] = hex(max_priority_fee_per_gas)
         user_operation["maxFeePerGas"] = hex(max_priority_fee_per_gas + get_base_fee(w3))
         user_operation["callGasLimit"] = hex(
-            int(_to_uint(user_operation["callGasLimit"]) * AA_BUNDLER_GAS_LIMIT_FACTOR)
+            apply_factor(user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR)
         )
     elif AA_BUNDLER_PROVIDER == "gelato":
         user_operation.update(
@@ -249,6 +254,20 @@ def build_user_operation(w3, tx, retry_nonce=None):
             return build_user_operation(w3, tx, retry_nonce=next_nonce)
 
         user_operation.update(resp["result"])
+
+        user_operation["verificationGasLimit"] = apply_factor(
+            user_operation["verificationGasLimit"], AA_BUNDLER_VERIFICATION_GAS_FACTOR
+        )
+        if "maxPriorityFeePerGas" in user_operation:
+            user_operation["maxPriorityFeePerGas"] = apply_factor(
+                user_operation["maxPriorityFeePerGas"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR
+            )
+
+        if "callGasLimit" in user_operation:
+            user_operation["callGasLimit"] = apply_factor(
+                user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR
+            )
+
     else:
         warn(f"Unknown AA_BUNDLER_PROVIDER: {AA_BUNDLER_PROVIDER}")
 
