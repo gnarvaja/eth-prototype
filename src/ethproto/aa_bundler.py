@@ -1,4 +1,5 @@
 import random
+from collections import defaultdict
 from enum import Enum
 from warnings import warn
 
@@ -51,7 +52,7 @@ GET_NONCE_ABI = [
     }
 ]
 
-NONCE_CACHE = {}
+NONCE_CACHE = defaultdict(lambda: 0)
 RANDOM_NONCE_KEY = None
 
 
@@ -153,20 +154,25 @@ def get_nonce_and_key(w3, tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fet
     if nonce is None:
         if fetch or nonce_mode == NonceMode.FIXED_KEY_FETCH_ALWAYS:
             nonce = fetch_nonce(w3, get_sender(tx), entry_point, nonce_key)
-        elif nonce_key not in NONCE_CACHE:
-            nonce = 0
         else:
             nonce = NONCE_CACHE[nonce_key]
     return nonce_key, nonce
 
 
-def handle_response_error(resp, w3, tx, retry_nonce):
+def consume_nonce(nonce_key, nonce):
+    NONCE_CACHE[nonce_key] = max(NONCE_CACHE[nonce_key], nonce + 1)
+
+
+def check_nonce_error(resp, retry_nonce):
+    """Returns the next nonce if resp contains a nonce error and retries weren't exhausted
+    Raises RevertError otherwise
+    """
     if "AA25" in resp["error"]["message"] and AA_BUNDLER_MAX_GETNONCE_RETRIES > 0:
         # Retry fetching the nonce
         if retry_nonce == AA_BUNDLER_MAX_GETNONCE_RETRIES:
             raise RevertError(resp["error"]["message"])
         warn(f'{resp["error"]["message"]} error, I will retry fetching the nonce')
-        return send_transaction(w3, tx, retry_nonce=(retry_nonce or 0) + 1)
+        return (retry_nonce or 0) + 1
     else:
         raise RevertError(resp["error"]["message"])
 
@@ -185,7 +191,7 @@ def get_sender(tx):
         return tx["from"]
 
 
-def send_transaction(w3, tx, retry_nonce=None):
+def build_user_operation(w3, tx, retry_nonce=None):
     nonce_key, nonce = get_nonce_and_key(
         w3, tx, AA_BUNDLER_NONCE_MODE, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=retry_nonce is not None
     )
@@ -210,7 +216,8 @@ def send_transaction(w3, tx, retry_nonce=None):
             "eth_estimateUserOperationGas", [user_operation, AA_BUNDLER_ENTRYPOINT]
         )
         if "error" in resp:
-            return handle_response_error(resp, w3, tx, retry_nonce)
+            next_nonce = check_nonce_error(resp, retry_nonce)
+            return build_user_operation(w3, tx, retry_nonce=next_nonce)
 
         user_operation.update(resp["result"])
 
@@ -233,21 +240,40 @@ def send_transaction(w3, tx, retry_nonce=None):
                 "maxPriorityFeePerGas": "0x00",
             }
         )
-    user_operation["signature"] = add_0x_prefix(
-        sign_user_operation(
-            AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
-        ).hex()
-    )
+    elif AA_BUNDLER_PROVIDER == "generic":
+        resp = w3.provider.make_request(
+            "eth_estimateUserOperationGas", [user_operation, AA_BUNDLER_ENTRYPOINT]
+        )
+        if "error" in resp:
+            next_nonce = check_nonce_error(resp, retry_nonce)
+            return build_user_operation(w3, tx, retry_nonce=next_nonce)
+
+        user_operation.update(resp["result"])
+    else:
+        warn(f"Unknown AA_BUNDLER_PROVIDER: {AA_BUNDLER_PROVIDER}")
+
     # Remove paymaster related fields
     user_operation.pop("paymaster", None)
     user_operation.pop("paymasterData", None)
     user_operation.pop("paymasterVerificationGasLimit", None)
     user_operation.pop("paymasterPostOpGasLimit", None)
 
+    # Consume the nonce, even if the userop may fail later
+    consume_nonce(nonce_key, nonce)
+
+    return user_operation
+
+
+def send_transaction(w3, tx, retry_nonce=None):
+    user_operation = build_user_operation(w3, tx, retry_nonce)
+    user_operation["signature"] = add_0x_prefix(
+        sign_user_operation(
+            AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
+        ).hex()
+    )
     resp = w3.provider.make_request("eth_sendUserOperation", [user_operation, AA_BUNDLER_ENTRYPOINT])
     if "error" in resp:
-        return handle_response_error(resp, w3, tx, retry_nonce)
+        next_nonce = check_nonce_error(resp, retry_nonce)
+        return send_transaction(w3, tx, retry_nonce=next_nonce)
 
-    # Store nonce in the cache, so next time uses a new nonce
-    NONCE_CACHE[nonce_key] = nonce + 1
     return {"userOpHash": resp["result"]}
