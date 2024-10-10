@@ -1,6 +1,7 @@
 import random
 from collections import defaultdict
 from enum import Enum
+from threading import local
 from warnings import warn
 
 from environs import Env
@@ -54,7 +55,7 @@ GET_NONCE_ABI = [
 ]
 
 NONCE_CACHE = defaultdict(lambda: 0)
-RANDOM_NONCE_KEY = None
+RANDOM_NONCE_KEY = local()
 
 
 def pack_two(a, b):
@@ -140,10 +141,9 @@ def fetch_nonce(w3, account, entry_point, nonce_key):
 
 
 def get_random_nonce_key():
-    global RANDOM_NONCE_KEY
-    if RANDOM_NONCE_KEY is None:
-        RANDOM_NONCE_KEY = random.randint(1, 2**192 - 1)
-    return RANDOM_NONCE_KEY
+    if getattr(RANDOM_NONCE_KEY, "key", None) is None:
+        RANDOM_NONCE_KEY.key = random.randint(1, 2**192 - 1)
+    return RANDOM_NONCE_KEY.key
 
 
 def get_nonce_and_key(w3, tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=False):
