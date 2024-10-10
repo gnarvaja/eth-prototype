@@ -229,22 +229,9 @@ def build_user_operation(w3, tx, retry_nonce=None):
         resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
         if "error" in resp:
             raise RevertError(resp["error"]["message"])
-        max_priority_fee_per_gas = apply_factor(resp["result"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
-        user_operation["maxPriorityFeePerGas"] = hex(max_priority_fee_per_gas)
-        user_operation["maxFeePerGas"] = hex(max_priority_fee_per_gas + get_base_fee(w3))
-        user_operation["callGasLimit"] = hex(
-            apply_factor(user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR)
-        )
-    elif AA_BUNDLER_PROVIDER == "gelato":
-        user_operation.update(
-            {
-                "preVerificationGas": "0x00",
-                "callGasLimit": "0x00",
-                "verificationGasLimit": "0x00",
-                "maxFeePerGas": "0x00",
-                "maxPriorityFeePerGas": "0x00",
-            }
-        )
+        user_operation["maxPriorityFeePerGas"] = resp["result"]
+        user_operation["maxFeePerGas"] = hex(int(resp["result"], 16) + get_base_fee(w3))
+
     elif AA_BUNDLER_PROVIDER == "generic":
         resp = w3.provider.make_request(
             "eth_estimateUserOperationGas", [user_operation, AA_BUNDLER_ENTRYPOINT]
@@ -255,21 +242,21 @@ def build_user_operation(w3, tx, retry_nonce=None):
 
         user_operation.update(resp["result"])
 
-        user_operation["verificationGasLimit"] = apply_factor(
-            user_operation["verificationGasLimit"], AA_BUNDLER_VERIFICATION_GAS_FACTOR
-        )
-        if "maxPriorityFeePerGas" in user_operation:
-            user_operation["maxPriorityFeePerGas"] = apply_factor(
-                user_operation["maxPriorityFeePerGas"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR
-            )
-
-        if "callGasLimit" in user_operation:
-            user_operation["callGasLimit"] = apply_factor(
-                user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR
-            )
-
     else:
         warn(f"Unknown AA_BUNDLER_PROVIDER: {AA_BUNDLER_PROVIDER}")
+
+    # Apply increase factors
+    user_operation["verificationGasLimit"] = hex(
+        apply_factor(user_operation["verificationGasLimit"], AA_BUNDLER_VERIFICATION_GAS_FACTOR)
+    )
+    if "maxPriorityFeePerGas" in user_operation:
+        user_operation["maxPriorityFeePerGas"] = hex(
+            apply_factor(user_operation["maxPriorityFeePerGas"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
+        )
+    if "callGasLimit" in user_operation:
+        user_operation["callGasLimit"] = hex(
+            apply_factor(user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR)
+        )
 
     # Remove paymaster related fields
     user_operation.pop("paymaster", None)
