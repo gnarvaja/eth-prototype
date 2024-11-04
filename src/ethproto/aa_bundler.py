@@ -8,7 +8,6 @@ from environs import Env
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from eth_utils import add_0x_prefix
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO

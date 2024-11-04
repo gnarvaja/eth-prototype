@@ -77,3 +77,31 @@ def test_wrapper_build_from_def():
     assert counter.value() == 0
     counter.increase()
     assert counter.value() == 1
+
+def test_get_events():
+    provider = wrappers.get_provider("w3")
+    contract_def = provider.get_contract_def("EventLauncher")
+    wrapper = wrappers.ETHWrapper.build_from_def(contract_def)
+
+    launcher = wrapper()
+
+    launcher.launchEvent1(1)
+
+    cutoff_block = provider.w3.eth.get_block("latest")
+    launcher.launchEvent2(2)
+    launcher.launchEvent1(3)
+
+    all_event1 = provider.get_events(launcher, "Event1", dict(from_block=0))
+    assert len(all_event1) == 2
+
+    first_event1_only = provider.get_events(launcher, "Event1", dict(to_block=cutoff_block.number))
+    assert len(first_event1_only) == 1
+    assert first_event1_only[0] == all_event1[0]
+
+    last_event1_only = provider.get_events(launcher, "Event1", dict(from_block=cutoff_block.number + 1))
+    assert len(last_event1_only) == 1
+    assert last_event1_only[0] == all_event1[-1]
+
+    event2 = provider.get_events(launcher, "Event2")
+    assert len(event2) == 1
+    assert event2[0].args.value == 2
