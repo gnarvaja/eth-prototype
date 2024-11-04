@@ -1,8 +1,11 @@
-import os
-from hexbytes import HexBytes
-from ethproto import aa_bundler
-from web3.constants import HASH_ZERO
+from queue import Queue
+from threading import Event, Thread
 from unittest.mock import MagicMock, patch
+
+from hexbytes import HexBytes
+from web3.constants import HASH_ZERO
+
+from ethproto import aa_bundler
 
 
 def test_pack_two():
@@ -66,9 +69,7 @@ def test_hash_packed_user_operation():
 
 def test_sign_user_operation():
     signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation, CHAIN_ID, ENTRYPOINT)
-    assert (
-        signature
-        == "0xb9b872bfe4e90f4628e8ec24879a5b01045f91da8457f3ce2b417d2e5774b508261ec1147a820e75a141cb61b884a78d7e88996ceddafb9a7016cfe7a48a1f4f1b"  # noqa
+    assert (signature == "0xb9b872bfe4e90f4628e8ec24879a5b01045f91da8457f3ce2b417d2e5774b508261ec1147a820e75a141cb61b884a78d7e88996ceddafb9a7016cfe7a48a1f4f1b"  # noqa
     )
 
 
@@ -76,9 +77,7 @@ def test_sign_user_operation_gas_diff():
     user_operation_2 = dict(user_operation)
     user_operation_2["maxPriorityFeePerGas"] -= 1
     signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation_2, CHAIN_ID, ENTRYPOINT)
-    assert (
-        signature
-        == "0x8162479d2dbd18d7fe93a2f51e283021d6e4eae4f57d20cdd553042723a0b0ea690ab3903d45126b0047da08ab53dfdf86656e4f258ac4936ba96a759ccb77f61b"  # noqa
+    assert (signature == "0x8162479d2dbd18d7fe93a2f51e283021d6e4eae4f57d20cdd553042723a0b0ea690ab3903d45126b0047da08ab53dfdf86656e4f258ac4936ba96a759ccb77f61b"  # noqa
     )
 
 
@@ -156,8 +155,8 @@ def test_get_nonce_random_key_mode(fetch_nonce_mock, randint_mock):
     fetch_nonce_mock.assert_not_called()
     randint_mock.assert_called_with(1, 2**192 - 1)
     randint_mock.reset_mock()
-    assert aa_bundler.RANDOM_NONCE_KEY == 444
-    aa_bundler.RANDOM_NONCE_KEY = None  # cleanup
+    assert aa_bundler.RANDOM_NONCE_KEY.key == 444
+    aa_bundler.RANDOM_NONCE_KEY.key = None  # cleanup
 
 
 @patch.object(aa_bundler.random, "randint")
@@ -242,3 +241,44 @@ def test_send_transaction(get_base_fee_mock):
     get_base_fee_mock.assert_called_once_with(w3)
     assert aa_bundler.NONCE_CACHE[0] == 1
     assert ret == {"userOpHash": "0xa950a17ca1ed83e974fb1aa227360a007cb65f566518af117ffdbb04d8d2d524"}
+
+
+def test_random_key_nonces_are_thread_safe():
+    queue = Queue()
+    event = Event()
+
+    def worker():
+        event.wait()  # Get all threads running at the same time
+        nonce_key, nonce = aa_bundler.get_nonce_and_key(
+            FAIL_IF_USED,
+            {"from": TEST_SENDER},
+            nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
+        )
+        aa_bundler.consume_nonce(nonce_key, nonce)
+        queue.put(
+            aa_bundler.get_nonce_and_key(
+                FAIL_IF_USED,
+                {"from": TEST_SENDER},
+                nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
+            )
+        )
+
+    threads = [Thread(target=worker) for _ in range(15)]
+    for thread in threads:
+        thread.start()
+
+    # Fire all threads at once
+    event.set()
+    for thread in threads:
+        thread.join()
+
+    nonces = {}
+
+    while not queue.empty():
+        nonce_key, nonce = queue.get_nowait()
+        # Each thread got a different key
+        assert nonce_key not in nonces
+        nonces[nonce_key] = nonce
+
+    # All nonces are the same
+    assert all(nonce == 1 for nonce in nonces.values())
