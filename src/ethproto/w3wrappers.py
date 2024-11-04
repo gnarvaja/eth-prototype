@@ -9,7 +9,7 @@ from eth_utils.abi import event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.contract import Contract
 from web3.exceptions import ContractLogicError, ExtraDataLengthError
-from web3.middleware import ExtraDataToPOAMiddleware
+from web3.middleware import geth_poa_middleware
 
 from .build_artifacts import ArtifactLibrary
 from .contracts import RevertError
@@ -75,9 +75,9 @@ def register_w3_provider(provider_key="w3", w3=None, tester=None, provider_kwarg
         try:
             w3.eth.get_block("latest")
         except ExtraDataLengthError:
-            w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     elif W3_POA == "yes":
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
     # If address_book not provided and there are envs with W3_ADDRESS_BOOK_PREFIX,
     # use W3EnvAddressBook

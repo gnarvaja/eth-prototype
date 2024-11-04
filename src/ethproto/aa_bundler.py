@@ -59,8 +59,8 @@ RANDOM_NONCE_KEY = local()
 
 
 def pack_two(a, b):
-    a = HexBytes(a).hex()
-    b = HexBytes(b).hex()
+    a = HexBytes(a).hex()[2:]
+    b = HexBytes(b).hex()[2:]
     return "0x" + a.zfill(32) + b.zfill(32)
 
 
@@ -110,23 +110,23 @@ def hash_packed_user_operation_only(packed_user_op):
                 hash_paymaster_and_data,
             ],
         ).hex()
-    )
+    ).hex()
 
 
 def hash_packed_user_operation(packed_user_op, chain_id, entry_point):
     return Web3.keccak(
         hexstr=encode(
             ["bytes32", "address", "uint256"],
-            [hash_packed_user_operation_only(packed_user_op), entry_point, chain_id],
+            [HexBytes(hash_packed_user_operation_only(packed_user_op)), entry_point, chain_id],
         ).hex()
-    )
+    ).hex()
 
 
 def sign_user_operation(private_key, user_operation, chain_id, entry_point):
     packed_user_op = pack_user_operation(user_operation)
     hash = hash_packed_user_operation(packed_user_op, chain_id, entry_point)
-    signature = Account.sign_message(encode_defunct(hexstr=hash.hex()), private_key)
-    return signature.signature
+    signature = Account.sign_message(encode_defunct(hexstr=hash), private_key)
+    return signature.signature.hex()
 
 
 def make_nonce(nonce_key, nonce):
@@ -272,11 +272,7 @@ def build_user_operation(w3, tx, retry_nonce=None):
 
 def send_transaction(w3, tx, retry_nonce=None):
     user_operation = build_user_operation(w3, tx, retry_nonce)
-    user_operation["signature"] = add_0x_prefix(
-        sign_user_operation(
-            AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
-        ).hex()
-    )
+    user_operation["signature"] = sign_user_operation(AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT)
     resp = w3.provider.make_request("eth_sendUserOperation", [user_operation, AA_BUNDLER_ENTRYPOINT])
     if "error" in resp:
         next_nonce = check_nonce_error(resp, retry_nonce)
