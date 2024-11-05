@@ -271,7 +271,9 @@ def build_user_operation(w3, tx, retry_nonce=None):
 
 def send_transaction(w3, tx, retry_nonce=None):
     user_operation = build_user_operation(w3, tx, retry_nonce)
-    user_operation["signature"] = sign_user_operation(AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT)
+    user_operation["signature"] = sign_user_operation(
+        AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
+    )
     resp = w3.provider.make_request("eth_sendUserOperation", [user_operation, AA_BUNDLER_ENTRYPOINT])
     if "error" in resp:
         next_nonce = check_nonce_error(resp, retry_nonce)

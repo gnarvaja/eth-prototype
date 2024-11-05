@@ -78,6 +78,7 @@ def test_wrapper_build_from_def():
     counter.increase()
     assert counter.value() == 1
 
+
 def test_get_events():
     provider = wrappers.get_provider("w3")
     contract_def = provider.get_contract_def("EventLauncher")
