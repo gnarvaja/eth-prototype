@@ -4,7 +4,10 @@ import pytest
 
 from ethproto import wrappers
 
-pytestmark = pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only tests")
+pytestmark = [
+    pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only tests"),
+    pytest.mark.usefixtures("local_node_provider"),
+]
 
 
 class Counter(wrappers.ETHWrapper):

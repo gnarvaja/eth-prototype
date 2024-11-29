@@ -2,7 +2,9 @@ from queue import Queue
 from threading import Event, Thread
 from unittest.mock import MagicMock, patch
 
+import pytest
 from hexbytes import HexBytes
+from web3.auto import w3
 from web3.constants import HASH_ZERO
 
 from ethproto import aa_bundler
@@ -284,3 +286,41 @@ def test_random_key_nonces_are_thread_safe():
 
     # All nonces are the same
     assert all(nonce == 1 for nonce in nonces.values())
+
+
+@pytest.mark.vcr
+def test_build_user_operation():
+    aa_bundler.AA_BUNDLER_EXECUTOR_PK = TEST_PRIVATE_KEY
+
+    tx = {
+        "value": 0,
+        "chainId": 137,
+        "from": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        "to": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        "data": "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",  # noqa
+    }
+
+    userop = aa_bundler.build_user_operation(w3, tx, ENTRYPOINT)
+
+    assert userop == {
+        "callData": (
+            "0xb61d27f60000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174"
+            "00000000000000000000000000000000000000000000000000000000000000000000000000"
+            "00000000000000000000000000000000000000000000000000006000000000000000000000"
+            "00000000000000000000000000000000000000000044095ea7b30000000000000000000000"
+            "007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffff"
+            "ffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000"
+            "00000000000000"
+        ),
+        "callGasLimit": "0xcbb8",
+        "maxFeePerGas": "0x1527d11a76",
+        "maxPriorityFeePerGas": "0x7aef40a00",
+        "nonce": "0x3",
+        "preVerificationGas": "0xb4cc",
+        "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        "signature": (
+            "0xfffffffffffffffffffffffffffffff00000000000000000000000000000000"
+            "07aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+        ),
+        "verificationGasLimit": "0xecb7",
+    }

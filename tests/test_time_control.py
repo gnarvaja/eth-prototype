@@ -4,6 +4,8 @@ import pytest
 
 from ethproto import wrappers
 
+pytestmark = pytest.mark.usefixtures("local_node_provider")
+
 
 @pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only test")
 def test_timecontrol():
