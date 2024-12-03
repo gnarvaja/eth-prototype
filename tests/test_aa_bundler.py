@@ -1,3 +1,4 @@
+from dataclasses import replace
 from queue import Queue
 from threading import Event, Thread
 from unittest.mock import MagicMock, patch
@@ -31,58 +32,57 @@ ENTRYPOINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 
 TEST_SENDER = "0x8961423b54f06bf6D57F8dD3dD1184FA6F3aac3f"
 
-user_operation = {
-    "sender": TEST_SENDER,
-    "nonce": 0,
-    "initCode": "0x",
-    "callData": TEST_CALL_DATA,
-    "callGasLimit": 999999,
-    "verificationGasLimit": 999999,
-    "preVerificationGas": 999999,
-    "maxFeePerGas": 1000000000,
-    "maxPriorityFeePerGas": 1000000000,
-    "paymaster": "0x0000000000000000000000000000000000000000",
-    "paymasterData": "0x",
-    "paymasterVerificationGasLimit": 0,
-    "paymasterPostOpGasLimit": 0,
-}
+
+user_operation = aa_bundler.UserOperation(
+    sender=TEST_SENDER,
+    nonce=0,
+    init_code="0x",
+    call_data=TEST_CALL_DATA,
+    call_gas_limit=999999,
+    verification_gas_limit=999999,
+    pre_verification_gas=999999,
+    max_fee_per_gas=1000000000,
+    max_priority_fee_per_gas=1000000000,
+    paymaster_and_data="0x",
+    signature="0x",
+)
 
 
 def test_pack_user_operation():
-    expected = {
-        "sender": TEST_SENDER,
-        "nonce": 0,
-        "initCode": "0x",
-        "callData": TEST_CALL_DATA,
-        "accountGasLimits": "0x000000000000000000000000000f423f000000000000000000000000000f423f",
-        "preVerificationGas": 999999,
-        "gasFees": "0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
-        "paymasterAndData": "0x",
-        "signature": "0x",
-    }
-    assert aa_bundler.pack_user_operation(user_operation) == expected
+    expected = aa_bundler.PackedUserOperation(
+        sender=TEST_SENDER,
+        nonce=0,
+        init_code="0x",
+        call_data=TEST_CALL_DATA,
+        account_gas_limits="0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        pre_verification_gas=999999,
+        gas_fees="0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        paymaster_and_data="0x",
+        signature="0x",
+    )
+    assert aa_bundler.PackedUserOperation.from_user_operation(user_operation) == expected
 
 
 def test_hash_packed_user_operation():
-    packed = aa_bundler.pack_user_operation(user_operation)
-    hash = aa_bundler.hash_packed_user_operation_only(packed)
-    assert hash == HexBytes("0xa2c19765d18b0d690c05b20061bd23d066201aff1833a51bd28af115fbd4bcd9")
-    hash = aa_bundler.hash_packed_user_operation(packed, CHAIN_ID, ENTRYPOINT)
-    assert hash == HexBytes("0xb365ad4d366e9081718e926912da7a78a2faae592286fda0cc11923bd141b7cf")
+    packed = aa_bundler.PackedUserOperation.from_user_operation(user_operation)
+    assert packed.hash() == HexBytes("0xa2c19765d18b0d690c05b20061bd23d066201aff1833a51bd28af115fbd4bcd9")
+    assert packed.hash_full(CHAIN_ID, ENTRYPOINT) == HexBytes(
+        "0xb365ad4d366e9081718e926912da7a78a2faae592286fda0cc11923bd141b7cf"
+    )
 
 
 def test_sign_user_operation():
-    signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation, CHAIN_ID, ENTRYPOINT)
-    assert signature == HexBytes(
+    signed = user_operation.sign(TEST_PRIVATE_KEY, CHAIN_ID, ENTRYPOINT)
+    assert signed.signature == HexBytes(
         "0xb9b872bfe4e90f4628e8ec24879a5b01045f91da8457f3ce2b417d2e5774b508261ec1147a820e75a141cb61b884a78d7e88996ceddafb9a7016cfe7a48a1f4f1b"  # noqa
     )
 
 
 def test_sign_user_operation_gas_diff():
-    user_operation_2 = dict(user_operation)
-    user_operation_2["maxPriorityFeePerGas"] -= 1
-    signature = aa_bundler.sign_user_operation(TEST_PRIVATE_KEY, user_operation_2, CHAIN_ID, ENTRYPOINT)
-    assert signature == HexBytes(
+    user_operation_2 = replace(
+        user_operation, max_priority_fee_per_gas=user_operation.max_priority_fee_per_gas - 1
+    ).sign(TEST_PRIVATE_KEY, CHAIN_ID, ENTRYPOINT)
+    assert user_operation_2.signature == HexBytes(
         "0x8162479d2dbd18d7fe93a2f51e283021d6e4eae4f57d20cdd553042723a0b0ea690ab3903d45126b0047da08ab53dfdf86656e4f258ac4936ba96a759ccb77f61b"  # noqa
     )
 
@@ -308,7 +308,7 @@ def test_build_user_operation():
 
     userop = aa_bundler.build_user_operation(w3, tx, ENTRYPOINT)
 
-    assert userop == {
+    assert userop.as_dict() == {
         "callData": (
             "0xb61d27f60000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174"
             "00000000000000000000000000000000000000000000000000000000000000000000000000"

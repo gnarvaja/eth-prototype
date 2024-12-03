@@ -1,8 +1,9 @@
 import random
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from threading import local
+from typing import TypedDict
 from warnings import warn
 
 from environs import Env
@@ -65,6 +66,20 @@ DUMMY_SIGNATURE = HexBytes(
 )
 
 
+class UserOpEstimation(TypedDict):
+    """eth_estimateUserOperationGas response"""
+
+    pre_verification_gas: int
+    verification_gas_limit: int
+    call_gas_limit: int
+    paymaster_verification_gas_limit: int
+
+
+class GasPrice(TypedDict):
+    max_priority_fee_per_gas: int
+    max_fee_per_gas: int
+
+
 @dataclass(frozen=True)
 class Tx:
     target: HexAddress
@@ -111,13 +126,52 @@ class UserOperation:
             ),
         )
 
-    def as_dict(self):
+    def as_reduced_dict(self):
         return {
             "sender": self.sender,
             "nonce": "0x%x" % self.nonce,
             "callData": self.call_data,
             "signature": add_0x_prefix(self.signature.hex()),
         }
+
+    def as_dict(self):
+        return {
+            "sender": self.sender,
+            "nonce": "0x%x" % self.nonce,
+            "callData": self.call_data,
+            "callGasLimit": "0x%x" % self.call_gas_limit,
+            "verificationGasLimit": "0x%x" % self.verification_gas_limit,
+            "preVerificationGas": "0x%x" % self.pre_verification_gas,
+            "maxPriorityFeePerGas": "0x%x" % self.max_priority_fee_per_gas,
+            "maxFeePerGas": "0x%x" % self.max_fee_per_gas,
+            "signature": add_0x_prefix(self.signature.hex()),
+        }
+
+    def add_estimation(self, estimation: UserOpEstimation) -> "UserOperation":
+        return replace(
+            self,
+            call_gas_limit=estimation["call_gas_limit"],
+            verification_gas_limit=estimation["verification_gas_limit"],
+            pre_verification_gas=estimation["pre_verification_gas"],
+        )
+
+    def add_gas_price(self, gas_price: GasPrice) -> "UserOperation":
+        return replace(
+            self,
+            max_priority_fee_per_gas=gas_price["max_priority_fee_per_gas"],
+            max_fee_per_gas=gas_price["max_fee_per_gas"],
+        )
+
+    def sign(self, private_key: HexBytes, chain_id, entry_point) -> "UserOperation":
+        signature = Account.sign_message(
+            encode_defunct(
+                hexstr=PackedUserOperation.from_user_operation(self)
+                .hash_full(chain_id=chain_id, entry_point=entry_point)
+                .hex()
+            ),
+            private_key,
+        )
+        return replace(self, signature=signature.signature)
 
 
 @dataclass(frozen=True)
@@ -128,7 +182,7 @@ class PackedUserOperation:
 
     account_gas_limits: HexBytes
     pre_verification_gas: int
-    gasFees: HexBytes
+    gas_fees: HexBytes
 
     init_code: HexBytes = HexBytes("0x")
     paymaster_and_data: HexBytes = HexBytes("0x")
@@ -139,13 +193,42 @@ class PackedUserOperation:
         return cls(
             sender=user_operation.sender,
             nonce=user_operation.nonce,
-            callData=user_operation.call_data,
-            accountGasLimits=pack_two(user_operation.verification_gas_limit, user_operation.call_gas_limit),
-            preVerificationGas=user_operation.pre_verification_gas,
-            gasFees=pack_two(user_operation.max_priority_fee_per_gas, user_operation.max_fee_per_gas),
-            initCode=user_operation.init_code,
-            paymasterAndData=user_operation.paymaster_and_data,
+            call_data=user_operation.call_data,
+            account_gas_limits=pack_two(user_operation.verification_gas_limit, user_operation.call_gas_limit),
+            pre_verification_gas=user_operation.pre_verification_gas,
+            gas_fees=pack_two(user_operation.max_priority_fee_per_gas, user_operation.max_fee_per_gas),
+            init_code=user_operation.init_code,
+            paymaster_and_data=user_operation.paymaster_and_data,
             signature=user_operation.signature,
+        )
+
+    def hash(self):
+        # https://github.com/eth-infinitism/account-abstraction/blob/develop/contracts/core/UserOperationLib.sol#L54
+        hash_init_code = Web3.solidity_keccak(["bytes"], [self.init_code])
+        hash_call_data = Web3.solidity_keccak(["bytes"], [self.call_data])
+        hash_paymaster_and_data = Web3.solidity_keccak(["bytes"], [self.paymaster_and_data])
+        return Web3.keccak(
+            hexstr=encode(
+                ["address", "uint256", "bytes32", "bytes32", "bytes32", "uint256", "bytes32", "bytes32"],
+                [
+                    self.sender,
+                    self.nonce,
+                    hash_init_code,
+                    hash_call_data,
+                    HexBytes(self.account_gas_limits),
+                    self.pre_verification_gas,
+                    HexBytes(self.gas_fees),
+                    hash_paymaster_and_data,
+                ],
+            ).hex()
+        )
+
+    def hash_full(self, chain_id, entry_point):
+        return Web3.keccak(
+            hexstr=encode(
+                ["bytes32", "address", "uint256"],
+                [self.hash(), entry_point, chain_id],
+            ).hex()
         )
 
 
@@ -161,63 +244,6 @@ def _to_uint(x):
     elif isinstance(x, int):
         return x
     raise RuntimeError(f"Invalid int value {x}")
-
-
-def apply_factor(x, factor):
-    return int(_to_uint(x) * factor)
-
-
-def pack_user_operation(user_operation):
-    # https://github.com/eth-infinitism/account-abstraction/blob/develop/contracts/interfaces/PackedUserOperation.sol
-    return {
-        "sender": user_operation["sender"],
-        "nonce": _to_uint(user_operation["nonce"]),
-        "initCode": "0x",
-        "callData": user_operation["callData"],
-        "accountGasLimits": pack_two(user_operation["verificationGasLimit"], user_operation["callGasLimit"]),
-        "preVerificationGas": _to_uint(user_operation["preVerificationGas"]),
-        "gasFees": pack_two(user_operation["maxPriorityFeePerGas"], user_operation["maxFeePerGas"]),
-        "paymasterAndData": "0x",
-        "signature": "0x",
-    }
-
-
-def hash_packed_user_operation_only(packed_user_op):
-    # https://github.com/eth-infinitism/account-abstraction/blob/develop/contracts/core/UserOperationLib.sol#L54
-    hash_init_code = Web3.solidity_keccak(["bytes"], [packed_user_op["initCode"]])
-    hash_call_data = Web3.solidity_keccak(["bytes"], [packed_user_op["callData"]])
-    hash_paymaster_and_data = Web3.solidity_keccak(["bytes"], [packed_user_op["paymasterAndData"]])
-    return Web3.keccak(
-        hexstr=encode(
-            ["address", "uint256", "bytes32", "bytes32", "bytes32", "uint256", "bytes32", "bytes32"],
-            [
-                packed_user_op["sender"],
-                packed_user_op["nonce"],
-                hash_init_code,
-                hash_call_data,
-                HexBytes(packed_user_op["accountGasLimits"]),
-                packed_user_op["preVerificationGas"],
-                HexBytes(packed_user_op["gasFees"]),
-                hash_paymaster_and_data,
-            ],
-        ).hex()
-    )
-
-
-def hash_packed_user_operation(packed_user_op, chain_id, entry_point):
-    return Web3.keccak(
-        hexstr=encode(
-            ["bytes32", "address", "uint256"],
-            [hash_packed_user_operation_only(packed_user_op), entry_point, chain_id],
-        ).hex()
-    )
-
-
-def sign_user_operation(private_key, user_operation, chain_id, entry_point):
-    packed_user_op = pack_user_operation(user_operation)
-    hash = hash_packed_user_operation(packed_user_op, chain_id, entry_point)
-    signature = Account.sign_message(encode_defunct(hexstr=hash.hex()), private_key)
-    return signature.signature
 
 
 def make_nonce(nonce_key, nonce):
@@ -287,73 +313,70 @@ def get_sender(tx):
         return tx.from_
 
 
-def build_user_operation(w3, tx, retry_nonce=None):
+def estimate_user_operation_gas(w3, user_operation: UserOperation, entrypoint) -> UserOpEstimation:
+    resp = w3.provider.make_request(
+        "eth_estimateUserOperationGas", [user_operation.as_reduced_dict(), entrypoint]
+    )
+    if "error" in resp:
+        raise RevertError(resp["error"]["message"])
+
+    paymaster_verification_gas_limit = resp["result"].get("paymasterVerificationGasLimit", "0x00")
+    return UserOpEstimation(
+        pre_verification_gas=int(resp["result"].get("preVerificationGas", "0x00"), 16),
+        verification_gas_limit=int(
+            int(resp["result"].get("verificationGasLimit", "0x00"), 16) * AA_BUNDLER_VERIFICATION_GAS_FACTOR
+        ),
+        call_gas_limit=int(int(resp["result"].get("callGasLimit", "0x00"), 16) * AA_BUNDLER_GAS_LIMIT_FACTOR),
+        paymaster_verification_gas_limit=(
+            int(paymaster_verification_gas_limit, 16) if paymaster_verification_gas_limit is not None else 0
+        ),
+    )
+
+
+def alchemy_gas_price(w3, user_operation):
+    resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
+    if "error" in resp:
+        raise RevertError(resp["error"]["message"])
+    max_priority_fee_per_gas = int(int(resp["result"], 16) * AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
+    max_fee_per_gas = max_priority_fee_per_gas + get_base_fee(w3)
+
+    return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
+
+
+def build_user_operation(w3, tx: Tx, retry_nonce=None) -> UserOperation:
     nonce_key, nonce = get_nonce_and_key(
         w3, tx, AA_BUNDLER_NONCE_MODE, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=retry_nonce is not None
     )
+    # Consume the nonce, even if the userop may fail later
+    consume_nonce(nonce_key, nonce)
 
-    user_operation = UserOperation.from_tx(tx, nonce).as_dict()
+    user_operation = UserOperation.from_tx(tx, nonce)
+    estimation = estimate_user_operation_gas(w3, user_operation, AA_BUNDLER_ENTRYPOINT)
+
+    user_operation = user_operation.add_estimation(estimation)
 
     if AA_BUNDLER_PROVIDER == "alchemy":
-        resp = w3.provider.make_request(
-            "eth_estimateUserOperationGas", [user_operation, AA_BUNDLER_ENTRYPOINT]
-        )
-        if "error" in resp:
-            next_nonce = check_nonce_error(resp, retry_nonce)
-            return build_user_operation(w3, tx, retry_nonce=next_nonce)
-
-        user_operation.update(resp["result"])
-
-        resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
-        if "error" in resp:
-            raise RevertError(resp["error"]["message"])
-        user_operation["maxPriorityFeePerGas"] = resp["result"]
-        user_operation["maxFeePerGas"] = hex(int(resp["result"], 16) + get_base_fee(w3))
+        gas_price = alchemy_gas_price(w3, user_operation)
+        user_operation = user_operation.add_gas_price(gas_price)
 
     elif AA_BUNDLER_PROVIDER == "generic":
-        resp = w3.provider.make_request(
-            "eth_estimateUserOperationGas", [user_operation, AA_BUNDLER_ENTRYPOINT]
-        )
-        if "error" in resp:
-            next_nonce = check_nonce_error(resp, retry_nonce)
-            return build_user_operation(w3, tx, retry_nonce=next_nonce)
-
-        user_operation.update(resp["result"])
+        # No additional gas price estimation
+        pass
 
     else:
         warn(f"Unknown AA_BUNDLER_PROVIDER: {AA_BUNDLER_PROVIDER}")
-
-    # Apply increase factors
-    user_operation["verificationGasLimit"] = hex(
-        apply_factor(user_operation["verificationGasLimit"], AA_BUNDLER_VERIFICATION_GAS_FACTOR)
-    )
-    if "maxPriorityFeePerGas" in user_operation:
-        user_operation["maxPriorityFeePerGas"] = hex(
-            apply_factor(user_operation["maxPriorityFeePerGas"], AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
-        )
-    if "callGasLimit" in user_operation:
-        user_operation["callGasLimit"] = hex(
-            apply_factor(user_operation["callGasLimit"], AA_BUNDLER_GAS_LIMIT_FACTOR)
-        )
-
-    # Remove paymaster related fields
-    user_operation.pop("paymaster", None)
-    user_operation.pop("paymasterData", None)
-    user_operation.pop("paymasterVerificationGasLimit", None)
-    user_operation.pop("paymasterPostOpGasLimit", None)
-
-    # Consume the nonce, even if the userop may fail later
-    consume_nonce(nonce_key, nonce)
 
     return user_operation
 
 
 def send_transaction(w3, tx: Tx, retry_nonce=None):
-    user_operation = build_user_operation(w3, tx, retry_nonce)
-    user_operation["signature"] = add_0x_prefix(
-        sign_user_operation(AA_BUNDLER_EXECUTOR_PK, user_operation, tx.chain_id, AA_BUNDLER_ENTRYPOINT).hex()
+    user_operation = build_user_operation(w3, tx, retry_nonce).sign(
+        AA_BUNDLER_EXECUTOR_PK, tx.chain_id, AA_BUNDLER_ENTRYPOINT
     )
-    resp = w3.provider.make_request("eth_sendUserOperation", [user_operation, AA_BUNDLER_ENTRYPOINT])
+
+    resp = w3.provider.make_request(
+        "eth_sendUserOperation", [user_operation.as_dict(), AA_BUNDLER_ENTRYPOINT]
+    )
     if "error" in resp:
         next_nonce = check_nonce_error(resp, retry_nonce)
         return send_transaction(w3, tx, retry_nonce=next_nonce)
