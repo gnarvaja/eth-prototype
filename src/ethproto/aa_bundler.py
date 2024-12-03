@@ -1,5 +1,6 @@
 import random
 from collections import defaultdict
+from dataclasses import dataclass
 from enum import Enum
 from threading import local
 from warnings import warn
@@ -8,7 +9,8 @@ from environs import Env
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from eth_utils import add_0x_prefix
+from eth_typing import HexAddress
+from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
@@ -56,6 +58,95 @@ GET_NONCE_ABI = [
 
 NONCE_CACHE = defaultdict(lambda: 0)
 RANDOM_NONCE_KEY = local()
+
+DUMMY_SIGNATURE = HexBytes(
+    "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+)
+
+
+@dataclass(frozen=True)
+class Tx:
+    target: HexAddress
+    data: HexBytes
+    value: int
+
+    nonce_key: HexBytes = None
+    nonce: int = None
+    from_: HexAddress = ADDRESS_ZERO
+    chain_id: int = None
+
+    def as_execute_args(self):
+        return [self.target, self.value, self.data]
+
+
+@dataclass(frozen=True)
+class UserOperation:
+    EXECUTE_ARG_TYPES = ["address", "uint256", "bytes"]
+    EXECUTE_SELECTOR = function_signature_to_4byte_selector(f"execute({','.join(EXECUTE_ARG_TYPES)})")
+
+    sender: HexBytes
+    nonce: int
+    call_data: HexBytes
+
+    max_fee_per_gas: int = 0
+    max_priority_fee_per_gas: int = 0
+
+    call_gas_limit: int = 0
+    verification_gas_limit: int = 0
+    pre_verification_gas: int = 0
+
+    signature: HexBytes = DUMMY_SIGNATURE
+
+    init_code: HexBytes = HexBytes("0x")
+    paymaster_and_data: HexBytes = HexBytes("0x")
+
+    @classmethod
+    def from_tx(cls, tx: Tx, nonce):
+        return cls(
+            sender=get_sender(tx),
+            nonce=nonce,
+            call_data=add_0x_prefix(
+                (cls.EXECUTE_SELECTOR + encode(cls.EXECUTE_ARG_TYPES, tx.as_execute_args())).hex()
+            ),
+        )
+
+    def as_dict(self):
+        return {
+            "sender": self.sender,
+            "nonce": "0x%x" % self.nonce,
+            "callData": self.call_data,
+            "signature": add_0x_prefix(self.signature.hex()),
+        }
+
+
+@dataclass(frozen=True)
+class PackedUserOperation:
+    sender: HexBytes
+    nonce: int
+    call_data: HexBytes
+
+    account_gas_limits: HexBytes
+    pre_verification_gas: int
+    gasFees: HexBytes
+
+    init_code: HexBytes = HexBytes("0x")
+    paymaster_and_data: HexBytes = HexBytes("0x")
+    signature: HexBytes = HexBytes("0x")
+
+    @classmethod
+    def from_user_operation(cls, user_operation: UserOperation):
+        return cls(
+            sender=user_operation.sender,
+            nonce=user_operation.nonce,
+            callData=user_operation.call_data,
+            accountGasLimits=pack_two(user_operation.verification_gas_limit, user_operation.call_gas_limit),
+            preVerificationGas=user_operation.pre_verification_gas,
+            gasFees=pack_two(user_operation.max_priority_fee_per_gas, user_operation.max_fee_per_gas),
+            initCode=user_operation.init_code,
+            paymasterAndData=user_operation.paymaster_and_data,
+            signature=user_operation.signature,
+        )
 
 
 def pack_two(a, b):
@@ -146,9 +237,9 @@ def get_random_nonce_key():
     return RANDOM_NONCE_KEY.key
 
 
-def get_nonce_and_key(w3, tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=False):
-    nonce_key = tx.get("nonceKey", None)
-    nonce = tx.get("nonce", None)
+def get_nonce_and_key(w3, tx: Tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=False):
+    nonce_key = tx.nonce_key
+    nonce = tx.nonce
 
     if nonce_key is None:
         if nonce_mode == NonceMode.RANDOM_KEY:
@@ -188,33 +279,20 @@ def get_base_fee(w3):
 
 
 def get_sender(tx):
-    if "from" not in tx or tx["from"] == ADDRESS_ZERO:
+    if tx.from_ == ADDRESS_ZERO:
         if AA_BUNDLER_SENDER is None:
             raise RuntimeError("Must define AA_BUNDLER_SENDER or send 'from' in the TX")
         return AA_BUNDLER_SENDER
     else:
-        return tx["from"]
+        return tx.from_
 
 
 def build_user_operation(w3, tx, retry_nonce=None):
     nonce_key, nonce = get_nonce_and_key(
         w3, tx, AA_BUNDLER_NONCE_MODE, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=retry_nonce is not None
     )
-    # "0xb61d27f6" = bytes4 hash of execute(address,uint256,bytes)
-    call_data = (
-        "0xb61d27f6"
-        + encode(["address", "uint256", "bytes"], [tx["to"], tx["value"], HexBytes(tx["data"])]).hex()
-    )
-    dummy_signature = (
-        "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
-    )
-    user_operation = {
-        "sender": get_sender(tx),
-        "nonce": hex(make_nonce(nonce_key, nonce)),
-        "callData": call_data,
-        "signature": dummy_signature,
-    }
+
+    user_operation = UserOperation.from_tx(tx, nonce).as_dict()
 
     if AA_BUNDLER_PROVIDER == "alchemy":
         resp = w3.provider.make_request(
@@ -270,12 +348,10 @@ def build_user_operation(w3, tx, retry_nonce=None):
     return user_operation
 
 
-def send_transaction(w3, tx, retry_nonce=None):
+def send_transaction(w3, tx: Tx, retry_nonce=None):
     user_operation = build_user_operation(w3, tx, retry_nonce)
     user_operation["signature"] = add_0x_prefix(
-        sign_user_operation(
-            AA_BUNDLER_EXECUTOR_PK, user_operation, tx["chainId"], AA_BUNDLER_ENTRYPOINT
-        ).hex()
+        sign_user_operation(AA_BUNDLER_EXECUTOR_PK, user_operation, tx.chain_id, AA_BUNDLER_ENTRYPOINT).hex()
     )
     resp = w3.provider.make_request("eth_sendUserOperation", [user_operation, AA_BUNDLER_ENTRYPOINT])
     if "error" in resp:

@@ -9,6 +9,8 @@ from web3.constants import HASH_ZERO
 
 from ethproto import aa_bundler
 
+from . import factories
+
 
 def test_pack_two():
     assert aa_bundler.pack_two(0, 0) == HASH_ZERO
@@ -101,7 +103,7 @@ def test_get_nonce_force_fetch(fetch_nonce_mock, randint_mock):
     fetch_nonce_mock.return_value = 123
     assert aa_bundler.get_nonce_and_key(
         FAIL_IF_USED,
-        {"nonceKey": 12, "from": TEST_SENDER},
+        factories.Tx(nonce_key=12, from_=TEST_SENDER),
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
         fetch=True,
     ) == (12, 123)
@@ -116,7 +118,7 @@ def test_get_nonce_fetch_always_mode(fetch_nonce_mock, randint_mock):
     fetch_nonce_mock.return_value = 111
     assert aa_bundler.get_nonce_and_key(
         FAIL_IF_USED,
-        {"nonceKey": 22, "from": TEST_SENDER},
+        factories.Tx(from_=TEST_SENDER, nonce_key=22),
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_FETCH_ALWAYS,
     ) == (22, 111)
     fetch_nonce_mock.assert_called_once_with(FAIL_IF_USED, TEST_SENDER, ENTRYPOINT, 22)
@@ -130,7 +132,7 @@ def test_get_nonce_nonce_key_in_tx(fetch_nonce_mock, randint_mock):
     # Test nonce_mode=NonceMode.FIXED_KEY_LOCAL_NONCE
     assert aa_bundler.get_nonce_and_key(
         FAIL_IF_USED,
-        {"nonceKey": 22, "from": TEST_SENDER},
+        factories.Tx(nonce_key=22),
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
     ) == (22, 0)
     randint_mock.assert_not_called()
@@ -139,7 +141,7 @@ def test_get_nonce_nonce_key_in_tx(fetch_nonce_mock, randint_mock):
     # Same if nonce_mode=NonceMode.RANDOM_KEY but nonceKey in the tx
     assert aa_bundler.get_nonce_and_key(
         FAIL_IF_USED,
-        {"nonceKey": 22, "from": TEST_SENDER},
+        factories.Tx(nonce_key=22),
         nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
     ) == (22, 0)
     randint_mock.assert_not_called()
@@ -153,7 +155,7 @@ def test_get_nonce_random_key_mode(fetch_nonce_mock, randint_mock):
     randint_mock.return_value = 444
     assert aa_bundler.get_nonce_and_key(
         FAIL_IF_USED,
-        {"from": TEST_SENDER},
+        factories.Tx(),
         nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
     ) == (444, 0)
     fetch_nonce_mock.assert_not_called()
@@ -172,7 +174,7 @@ def test_get_nonce_with_local_cache(fetch_nonce_mock, randint_mock):
         # Test nonce_mode=NonceMode.FIXED_KEY_LOCAL_NONCE
         assert aa_bundler.get_nonce_and_key(
             FAIL_IF_USED,
-            {"from": TEST_SENDER},
+            factories.Tx(),
             nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
         ) == (55, 33)
         randint_mock.assert_not_called()
@@ -188,13 +190,15 @@ def test_send_transaction(get_base_fee_mock):
 
     aa_bundler.AA_BUNDLER_EXECUTOR_PK = TEST_PRIVATE_KEY
 
-    tx = {
-        "value": 0,
-        "chainId": 137,
-        "from": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
-        "to": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-        "data": "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",  # noqa
-    }
+    tx = aa_bundler.Tx(
+        value=0,
+        target="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        data=HexBytes(
+            "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"  # noqa
+        ),
+        from_="0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        chain_id=137,
+    )
 
     def make_request(method, params):
         if method == "eth_estimateUserOperationGas":
@@ -255,14 +259,14 @@ def test_random_key_nonces_are_thread_safe():
         event.wait()  # Get all threads running at the same time
         nonce_key, nonce = aa_bundler.get_nonce_and_key(
             FAIL_IF_USED,
-            {"from": TEST_SENDER},
+            factories.Tx(),
             nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
         )
         aa_bundler.consume_nonce(nonce_key, nonce)
         queue.put(
             aa_bundler.get_nonce_and_key(
                 FAIL_IF_USED,
-                {"from": TEST_SENDER},
+                factories.Tx(),
                 nonce_mode=aa_bundler.NonceMode.RANDOM_KEY,
             )
         )
@@ -292,13 +296,15 @@ def test_random_key_nonces_are_thread_safe():
 def test_build_user_operation():
     aa_bundler.AA_BUNDLER_EXECUTOR_PK = TEST_PRIVATE_KEY
 
-    tx = {
-        "value": 0,
-        "chainId": 137,
-        "from": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
-        "to": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-        "data": "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",  # noqa
-    }
+    tx = aa_bundler.Tx(
+        value=0,
+        chain_id=137,
+        from_="0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        target="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        data=HexBytes(
+            "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"  # noqa
+        ),
+    )
 
     userop = aa_bundler.build_user_operation(w3, tx, ENTRYPOINT)
 
