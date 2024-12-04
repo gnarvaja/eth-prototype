@@ -27,5 +27,6 @@ jobs:
         run: |
           cd tests/hardhat-project
           npm ci
+          npx hardhat compile
       - name: Test with tox
         run: tox
