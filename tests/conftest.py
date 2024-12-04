@@ -50,7 +50,11 @@ def pytest_recording_configure(config, vcr: VCR):
 
 @pytest.fixture(autouse=True)
 def vcr_config():
-    return {"match_on": ["json_rpc"], "allow_playback_repeats": True}
+    return {
+        "match_on": ["json_rpc"],
+        "allow_playback_repeats": True,
+        "allowed_hosts": ["localhost", "127.0.0.1", "::1"],
+    }
 
 
 @pytest.fixture(scope="session")

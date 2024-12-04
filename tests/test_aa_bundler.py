@@ -13,11 +13,6 @@ from ethproto import aa_bundler
 from . import factories
 
 
-@pytest.fixture
-def bundler():
-    return aa_bundler.Bundler(w3, w3.provider._get_active_provider(use_cache=True).endpoint_uri)
-
-
 def test_pack_two():
     assert aa_bundler.pack_two(0, 0) == HASH_ZERO
     assert aa_bundler.pack_two(1, 2) == "0x0000000000000000000000000000000100000000000000000000000000000002"
@@ -293,7 +288,6 @@ def test_build_user_operation():
 
     userop = aa_bundler.Bundler(
         w3,
-        w3.provider._get_active_provider(True).endpoint_uri,
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
         fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
         executor_pk=TEST_PRIVATE_KEY,
