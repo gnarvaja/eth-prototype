@@ -21,7 +21,6 @@ def pytest_configure(config):
 
     wrappers.DEFAULT_PROVIDER = "w3"
     w3wrappers.CONTRACT_JSON_PATH = ["tests/hardhat-project"]
-    # os.environ["WEB3_PROVIDER_URI"] = "http://localhost:5350"
 
 
 @pytest.fixture(scope="module")

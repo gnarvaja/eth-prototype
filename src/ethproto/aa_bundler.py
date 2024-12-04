@@ -20,6 +20,7 @@ from .contracts import RevertError
 
 env = Env()
 
+AA_BUNDLER_URL = env.str("AA_BUNDLER_URL", env.str("WEB3_PROVIDER_URI", "http://localhost:8545"))
 AA_BUNDLER_SENDER = env.str("AA_BUNDLER_SENDER", None)
 AA_BUNDLER_ENTRYPOINT = env.str("AA_BUNDLER_ENTRYPOINT", "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
 AA_BUNDLER_EXECUTOR_PK = env.str("AA_BUNDLER_EXECUTOR_PK", None)
@@ -264,26 +265,6 @@ def get_random_nonce_key(force=False):
     return RANDOM_NONCE_KEY.key
 
 
-def get_nonce_and_key(w3, tx: Tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=False):
-    nonce_key = tx.nonce_key
-    nonce = tx.nonce
-
-    if nonce_key is None:
-        if nonce_mode == NonceMode.RANDOM_KEY:
-            nonce_key = get_random_nonce_key()
-        elif nonce_mode == NonceMode.RANDOM_KEY_EVERYTIME:
-            nonce_key = get_random_nonce_key(force=True)
-        else:
-            nonce_key = AA_BUNDLER_NONCE_KEY
-
-    if nonce is None:
-        if fetch or nonce_mode == NonceMode.FIXED_KEY_FETCH_ALWAYS:
-            nonce = fetch_nonce(w3, get_sender(tx), entry_point, nonce_key)
-        else:
-            nonce = NONCE_CACHE[nonce_key]
-    return nonce_key, nonce
-
-
 def consume_nonce(nonce_key, nonce):
     NONCE_CACHE[nonce_key] = max(NONCE_CACHE[nonce_key], nonce + 1)
 
@@ -302,11 +283,6 @@ def check_nonce_error(resp, retry_nonce):
         raise RevertError(resp["error"]["message"])
 
 
-def get_base_fee(w3):
-    blk = w3.eth.get_block("latest")
-    return int(_to_uint(blk["baseFeePerGas"]) * AA_BUNDLER_BASE_GAS_PRICE_FACTOR)
-
-
 def get_sender(tx):
     if tx.from_ == ADDRESS_ZERO:
         if AA_BUNDLER_SENDER is None:
@@ -316,72 +292,119 @@ def get_sender(tx):
         return tx.from_
 
 
-def estimate_user_operation_gas(w3, user_operation: UserOperation, entrypoint) -> UserOpEstimation:
-    resp = w3.provider.make_request(
-        "eth_estimateUserOperationGas", [user_operation.as_reduced_dict(), entrypoint]
-    )
-    if "error" in resp:
-        raise RevertError(resp["error"]["message"])
+class Bundler:
+    def __init__(
+        self,
+        w3: Web3,
+        bundler_url: str = AA_BUNDLER_URL,
+        bundler_type: str = AA_BUNDLER_PROVIDER,
+        entrypoint: HexAddress = AA_BUNDLER_ENTRYPOINT,
+        nonce_mode: NonceMode = AA_BUNDLER_NONCE_MODE,
+        fixed_nonce_key: int = AA_BUNDLER_NONCE_KEY,
+        verification_gas_factor: float = AA_BUNDLER_VERIFICATION_GAS_FACTOR,
+        gas_limit_factor: float = AA_BUNDLER_GAS_LIMIT_FACTOR,
+        priority_gas_price_factor: float = AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR,
+        base_gas_price_factor: float = AA_BUNDLER_BASE_GAS_PRICE_FACTOR,
+        executor_pk: HexBytes = AA_BUNDLER_EXECUTOR_PK,
+    ):
+        self.w3 = w3
+        self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[])
+        self.bundler_type = bundler_type
+        self.entrypoint = entrypoint
+        self.nonce_mode = nonce_mode
+        self.fixed_nonce_key = fixed_nonce_key
+        self.verification_gas_factor = verification_gas_factor
+        self.gas_limit_factor = gas_limit_factor
+        self.priority_gas_price_factor = priority_gas_price_factor
+        self.base_gas_price_factor = base_gas_price_factor
+        self.executor_pk = executor_pk
 
-    paymaster_verification_gas_limit = resp["result"].get("paymasterVerificationGasLimit", "0x00")
-    return UserOpEstimation(
-        pre_verification_gas=int(resp["result"].get("preVerificationGas", "0x00"), 16),
-        verification_gas_limit=int(
-            int(resp["result"].get("verificationGasLimit", "0x00"), 16) * AA_BUNDLER_VERIFICATION_GAS_FACTOR
-        ),
-        call_gas_limit=int(int(resp["result"].get("callGasLimit", "0x00"), 16) * AA_BUNDLER_GAS_LIMIT_FACTOR),
-        paymaster_verification_gas_limit=(
-            int(paymaster_verification_gas_limit, 16) if paymaster_verification_gas_limit is not None else 0
-        ),
-    )
+    def get_nonce_and_key(self, tx: Tx, fetch=False):
+        nonce_key = tx.nonce_key
+        nonce = tx.nonce
 
+        if nonce_key is None:
+            if self.nonce_mode == NonceMode.RANDOM_KEY:
+                nonce_key = get_random_nonce_key()
+            elif self.nonce_mode == NonceMode.RANDOM_KEY_EVERYTIME:
+                nonce_key = get_random_nonce_key(force=True)
+            else:
+                nonce_key = self.fixed_nonce_key
 
-def alchemy_gas_price(w3, user_operation):
-    resp = w3.provider.make_request("rundler_maxPriorityFeePerGas", [])
-    if "error" in resp:
-        raise RevertError(resp["error"]["message"])
-    max_priority_fee_per_gas = int(int(resp["result"], 16) * AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR)
-    max_fee_per_gas = max_priority_fee_per_gas + get_base_fee(w3)
+        if nonce is None:
+            if fetch or self.nonce_mode == NonceMode.FIXED_KEY_FETCH_ALWAYS:
+                nonce = fetch_nonce(self.w3, get_sender(tx), self.entrypoint, nonce_key)
+            else:
+                nonce = NONCE_CACHE[nonce_key]
+        return nonce_key, nonce
 
-    return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
+    def get_base_fee(self):
+        blk = self.w3.eth.get_block("latest")
+        return int(_to_uint(blk["baseFeePerGas"]) * self.base_gas_price_factor)
 
+    def estimate_user_operation_gas(self, user_operation: UserOperation) -> UserOpEstimation:
+        resp = self.bundler.provider.make_request(
+            "eth_estimateUserOperationGas", [user_operation.as_reduced_dict(), self.entrypoint]
+        )
+        if "error" in resp:
+            raise RevertError(resp["error"]["message"])
 
-def build_user_operation(w3, tx: Tx, retry_nonce=None) -> UserOperation:
-    nonce_key, nonce = get_nonce_and_key(
-        w3, tx, AA_BUNDLER_NONCE_MODE, entry_point=AA_BUNDLER_ENTRYPOINT, fetch=retry_nonce is not None
-    )
-    # Consume the nonce, even if the userop may fail later
-    consume_nonce(nonce_key, nonce)
+        paymaster_verification_gas_limit = resp["result"].get("paymasterVerificationGasLimit", "0x00")
+        return UserOpEstimation(
+            pre_verification_gas=int(resp["result"].get("preVerificationGas", "0x00"), 16),
+            verification_gas_limit=int(
+                int(resp["result"].get("verificationGasLimit", "0x00"), 16) * self.verification_gas_factor
+            ),
+            call_gas_limit=int(int(resp["result"].get("callGasLimit", "0x00"), 16) * self.gas_limit_factor),
+            paymaster_verification_gas_limit=(
+                int(paymaster_verification_gas_limit, 16)
+                if paymaster_verification_gas_limit is not None
+                else 0
+            ),
+        )
 
-    user_operation = UserOperation.from_tx(tx, nonce)
-    estimation = estimate_user_operation_gas(w3, user_operation, AA_BUNDLER_ENTRYPOINT)
+    def alchemy_gas_price(self):
+        resp = self.bundler.provider.make_request("rundler_maxPriorityFeePerGas", [])
+        if "error" in resp:
+            raise RevertError(resp["error"]["message"])
+        max_priority_fee_per_gas = int(int(resp["result"], 16) * self.priority_gas_price_factor)
+        max_fee_per_gas = max_priority_fee_per_gas + self.get_base_fee()
 
-    user_operation = user_operation.add_estimation(estimation)
+        return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
-    if AA_BUNDLER_PROVIDER == "alchemy":
-        gas_price = alchemy_gas_price(w3, user_operation)
-        user_operation = user_operation.add_gas_price(gas_price)
+    def build_user_operation(self, tx: Tx, retry_nonce=None) -> UserOperation:
+        nonce_key, nonce = self.get_nonce_and_key(tx, fetch=retry_nonce is not None)
+        # Consume the nonce, even if the userop may fail later
+        consume_nonce(nonce_key, nonce)
 
-    elif AA_BUNDLER_PROVIDER == "generic":
-        # No additional gas price estimation
-        pass
+        user_operation = UserOperation.from_tx(tx, make_nonce(nonce_key, nonce))
+        estimation = self.estimate_user_operation_gas(user_operation)
 
-    else:
-        warn(f"Unknown AA_BUNDLER_PROVIDER: {AA_BUNDLER_PROVIDER}")
+        user_operation = user_operation.add_estimation(estimation)
 
-    return user_operation
+        if self.bundler_type == "alchemy":
+            gas_price = self.alchemy_gas_price()
+            user_operation = user_operation.add_gas_price(gas_price)
 
+        elif self.bundler_type == "generic":
+            # At the moment generic just prices the gas at 0
+            pass
 
-def send_transaction(w3, tx: Tx, retry_nonce=None):
-    user_operation = build_user_operation(w3, tx, retry_nonce).sign(
-        AA_BUNDLER_EXECUTOR_PK, tx.chain_id, AA_BUNDLER_ENTRYPOINT
-    )
+        else:
+            warn(f"Unknown bundler_type: {self.bundler_type}")
 
-    resp = w3.provider.make_request(
-        "eth_sendUserOperation", [user_operation.as_dict(), AA_BUNDLER_ENTRYPOINT]
-    )
-    if "error" in resp:
-        next_nonce = check_nonce_error(resp, retry_nonce)
-        return send_transaction(w3, tx, retry_nonce=next_nonce)
+        return user_operation
 
-    return {"userOpHash": resp["result"]}
+    def send_transaction(self, tx: Tx, retry_nonce=None):
+        user_operation = self.build_user_operation(tx, retry_nonce).sign(
+            self.executor_pk, tx.chain_id, self.entrypoint
+        )
+
+        resp = self.bundler.provider.make_request(
+            "eth_sendUserOperation", [user_operation.as_dict(), self.entrypoint]
+        )
+        if "error" in resp:
+            next_nonce = check_nonce_error(resp, retry_nonce)
+            return self.send_transaction(tx, retry_nonce=next_nonce)
+
+        return {"userOpHash": resp["result"]}
