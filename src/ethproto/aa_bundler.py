@@ -14,6 +14,7 @@ from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
+from web3.types import TxParams
 
 from .contracts import RevertError
 
@@ -93,6 +94,16 @@ class Tx:
     nonce: int = None
     from_: HexAddress = ADDRESS_ZERO
     chain_id: int = None
+
+    @classmethod
+    def from_tx_params(cls, params: TxParams) -> "Tx":
+        return cls(
+            target=params["to"],
+            data=HexBytes(params["data"]),
+            value=params["value"],
+            from_=params.get("from", ADDRESS_ZERO),
+            chain_id=params.get("chainId", None),
+        )
 
     def as_execute_args(self):
         return [self.target, self.value, self.data]
@@ -319,6 +330,14 @@ class Bundler:
         self.priority_gas_price_factor = priority_gas_price_factor
         self.base_gas_price_factor = base_gas_price_factor
         self.executor_pk = executor_pk
+
+    def __str__(self):
+        return (
+            f"Bundler(type={self.bundler_type}, entrypoint={self.entrypoint}, nonce_mode={self.nonce_mode}"
+            f"fixed_nonce_key={self.fixed_nonce_key}, verification_gas_factor={self.verification_gas_factor},"
+            f"gas_limit_factor={self.gas_limit_factor}, priority_gas_price_factor={self.priority_gas_price_factor},"
+            f"base_gas_price_factor={self.base_gas_price_factor})"
+        )
 
     def get_nonce_and_key(self, tx: Tx, fetch=False):
         nonce_key = tx.nonce_key
