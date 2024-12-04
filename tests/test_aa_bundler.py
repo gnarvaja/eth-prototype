@@ -9,8 +9,7 @@ from web3.auto import w3
 from web3.constants import HASH_ZERO
 
 from ethproto import aa_bundler
-
-from . import factories
+from ethproto.test_utils import factories
 
 
 def test_pack_two():

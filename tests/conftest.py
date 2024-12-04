@@ -10,7 +10,7 @@ from vcr import VCR
 from web3.auto import w3
 from web3.middleware import ExtraDataToPOAMiddleware
 
-from . import vcr_utils
+from ethproto.test_utils import vcr_utils
 
 
 def pytest_configure(config):
