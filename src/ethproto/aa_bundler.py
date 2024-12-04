@@ -164,11 +164,11 @@ class UserOperation:
             max_fee_per_gas=gas_price["max_fee_per_gas"],
         )
 
-    def sign(self, private_key: HexBytes, chain_id, entry_point) -> "UserOperation":
+    def sign(self, private_key: HexBytes, chain_id, entrypoint) -> "UserOperation":
         signature = Account.sign_message(
             encode_defunct(
                 hexstr=PackedUserOperation.from_user_operation(self)
-                .hash_full(chain_id=chain_id, entry_point=entry_point)
+                .hash_full(chain_id=chain_id, entrypoint=entrypoint)
                 .hex()
             ),
             private_key,
@@ -225,11 +225,11 @@ class PackedUserOperation:
             ).hex()
         )
 
-    def hash_full(self, chain_id, entry_point):
+    def hash_full(self, chain_id, entrypoint):
         return Web3.keccak(
             hexstr=encode(
                 ["bytes32", "address", "uint256"],
-                [self.hash(), entry_point, chain_id],
+                [self.hash(), entrypoint, chain_id],
             ).hex()
         )
 
@@ -254,8 +254,8 @@ def make_nonce(nonce_key, nonce):
     return (nonce_key << 64) | nonce
 
 
-def fetch_nonce(w3, account, entry_point, nonce_key):
-    ep = w3.eth.contract(abi=GET_NONCE_ABI, address=entry_point)
+def fetch_nonce(w3, account, entrypoint, nonce_key):
+    ep = w3.eth.contract(abi=GET_NONCE_ABI, address=entrypoint)
     return ep.functions.getNonce(account, nonce_key).call()
 
 
