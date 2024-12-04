@@ -24,11 +24,11 @@ def local_node_provider(hardhat_node):
     if os.environ.get("TEST_ENV", None) == "web3py":
         from web3 import Web3
 
-        from ethproto import w3wrappers, wrappers
+        from ethproto import w3wrappers
 
-        wrappers.register_provider("w3", w3wrappers.W3Provider(Web3(Web3.HTTPProvider(hardhat_node))))
+        w3wrappers.register_w3_provider("w3", Web3(Web3.HTTPProvider(hardhat_node)))
         yield
-        wrappers.register_provider("w3", w3wrappers.W3Provider(w3))
+        w3wrappers.register_w3_provider("w3", w3)
         return
     yield
 

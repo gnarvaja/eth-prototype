@@ -303,7 +303,7 @@ class ETHWrapper:
     constructor_args = None
     initialize_args = None
 
-    def __init__(self, owner="owner", *init_params, **kwargs):
+    def __init__(self, owner=None, *init_params, **kwargs):
         self.provider_key = kwargs.get("provider_key", None)
         init_params = self._parse_init_params(init_params, kwargs)
         self.provider.init_eth_wrapper(self, owner, init_params, kwargs)
