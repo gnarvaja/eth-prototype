@@ -33,6 +33,7 @@ NonceMode = Enum(
     "NonceMode",
     [
         "RANDOM_KEY",  # first time initializes a random key and increments nonce locally with calling the blockchain
+        "RANDOM_KEY_EVERYTIME",  # initializes a random key every time and increments nonce locally
         "FIXED_KEY_LOCAL_NONCE",  # uses a fixed key, keeps nonce locally and fetches the nonce when receiving
         # 'AA25 invalid account nonce'
         "FIXED_KEY_FETCH_ALWAYS",  # uses a fixed key, always fetches unless received as parameter
@@ -257,8 +258,8 @@ def fetch_nonce(w3, account, entry_point, nonce_key):
     return ep.functions.getNonce(account, nonce_key).call()
 
 
-def get_random_nonce_key():
-    if getattr(RANDOM_NONCE_KEY, "key", None) is None:
+def get_random_nonce_key(force=False):
+    if force or getattr(RANDOM_NONCE_KEY, "key", None) is None:
         RANDOM_NONCE_KEY.key = random.randint(1, 2**192 - 1)
     return RANDOM_NONCE_KEY.key
 
@@ -270,6 +271,8 @@ def get_nonce_and_key(w3, tx: Tx, nonce_mode, entry_point=AA_BUNDLER_ENTRYPOINT,
     if nonce_key is None:
         if nonce_mode == NonceMode.RANDOM_KEY:
             nonce_key = get_random_nonce_key()
+        elif nonce_mode == NonceMode.RANDOM_KEY_EVERYTIME:
+            nonce_key = get_random_nonce_key(force=True)
         else:
             nonce_key = AA_BUNDLER_NONCE_KEY
 
