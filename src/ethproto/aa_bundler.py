@@ -3,7 +3,6 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from enum import Enum
 from threading import local
-from typing import TypedDict
 from warnings import warn
 
 from environs import Env
@@ -68,7 +67,8 @@ DUMMY_SIGNATURE = HexBytes(
 )
 
 
-class UserOpEstimation(TypedDict):
+@dataclass(frozen=True)
+class UserOpEstimation:
     """eth_estimateUserOperationGas response"""
 
     pre_verification_gas: int
@@ -77,7 +77,8 @@ class UserOpEstimation(TypedDict):
     paymaster_verification_gas_limit: int
 
 
-class GasPrice(TypedDict):
+@dataclass(frozen=True)
+class GasPrice:
     max_priority_fee_per_gas: int
     max_fee_per_gas: int
 
@@ -152,16 +153,16 @@ class UserOperation:
     def add_estimation(self, estimation: UserOpEstimation) -> "UserOperation":
         return replace(
             self,
-            call_gas_limit=estimation["call_gas_limit"],
-            verification_gas_limit=estimation["verification_gas_limit"],
-            pre_verification_gas=estimation["pre_verification_gas"],
+            call_gas_limit=estimation.call_gas_limit,
+            verification_gas_limit=estimation.verification_gas_limit,
+            pre_verification_gas=estimation.pre_verification_gas,
         )
 
     def add_gas_price(self, gas_price: GasPrice) -> "UserOperation":
         return replace(
             self,
-            max_priority_fee_per_gas=gas_price["max_priority_fee_per_gas"],
-            max_fee_per_gas=gas_price["max_fee_per_gas"],
+            max_priority_fee_per_gas=gas_price.max_priority_fee_per_gas,
+            max_fee_per_gas=gas_price.max_fee_per_gas,
         )
 
     def sign(self, private_key: HexBytes, chain_id, entrypoint) -> "UserOperation":
