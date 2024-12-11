@@ -21,6 +21,8 @@ env = Env()
 
 TEST_ENV = env.list("TEST_ENV", ["pure-python"])
 
+pytestmark = pytest.mark.usefixtures("local_node_provider")
+
 
 class TestCurrency(wrappers.IERC20):
     eth_contract = "TestCurrency"

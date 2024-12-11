@@ -111,7 +111,7 @@ def transact(provider, function, tx_kwargs):
             }
         )
         signed_tx = from_.sign_transaction(tx)
-        tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        tx_hash = provider.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     elif W3_TRANSACT_MODE == "defender-async":
         from .defender_relay import send_transaction
 
@@ -211,8 +211,8 @@ class W3EnvAddressBook(AddressBook):
         if isinstance(name, (Account, LocalAccount)):
             return name
         if name is None:
-            return self.ZERO
-        if type(name) == str and name.startswith("0x"):
+            return list(self.signers.values())[0] if self.signers else self.ZERO
+        if isinstance(name, str) and name.startswith("0x"):
             return name
         if name in self.name_to_address:
             return self.name_to_address[name]
@@ -483,7 +483,7 @@ class W3Provider(BaseProvider):
         for lib, _ in contract_def.libraries():
             if lib not in libraries:
                 library_def = self.get_contract_factory(lib)
-                library = self.construct(library_def)
+                library = self.construct(library_def, transact_kwargs={"from": eth_wrapper.owner})
                 libraries[lib] = library.address
 
         if libraries:
