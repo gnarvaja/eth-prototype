@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -122,3 +123,58 @@ def test_artifact_libraries_generator():
     artifact_with_no_libraries = library.get_artifact("contracts/Counter.sol")
     libraries = list(artifact_with_no_libraries.libraries())
     assert libraries == []
+
+
+def test_artifact_library_ref_lookup():
+    library = ArtifactLibrary(
+        os.path.join(HARDHAT_PROJECT, "artifacts"),
+        os.path.join(HARDHAT_PROJECT, "verifiable-binaries"),
+    )
+
+    assert library.get_artifact_by_ref("TestCurrency") == library.get_artifact("contracts/TestCurrency.sol")
+
+    # Testing the internal _find_ref method to avoid the need of actual artifacts and to better check the results.
+
+    # No package or version specified, local is loaded
+    assert library._find_ref("TestCurrency") == {
+        "path": Path(HARDHAT_PROJECT) / "artifacts" / "contracts" / "TestCurrency.sol" / "TestCurrency.json",
+        "package": "",
+        "version": "local",
+    }
+
+    # Local version explicitly requested
+    assert library._find_ref("TestCurrency@local") == {
+        "path": Path(HARDHAT_PROJECT) / "artifacts" / "contracts" / "TestCurrency.sol" / "TestCurrency.json",
+        "package": "",
+        "version": "local",
+    }
+
+    # Specific package requested, latest version is loaded
+    assert library._find_ref("@org/pkg/TestCurrency") == {
+        "path": Path(HARDHAT_PROJECT)
+        / "verifiable-binaries/@org/pkg/0.3.0/build/contracts/TestCurrency.json",
+        "package": "@org/pkg",
+        "version": "0.3.0",
+    }
+
+    # Specific package and version requested
+    assert library._find_ref("@org/pkg/TestCurrency@0.2.1") == {
+        "path": Path(HARDHAT_PROJECT)
+        / "verifiable-binaries/@org/pkg/0.2.1/build/contracts/TestCurrency.json",
+        "package": "@org/pkg",
+        "version": "0.2.1",
+    }
+
+    # Different package, latest version too
+    assert library._find_ref("@anotherOrg/aPkg/TestCurrency") == {
+        "path": Path(HARDHAT_PROJECT)
+        / "verifiable-binaries/@anotherOrg/aPkg/1.0.2/build/contracts/TestCurrency.sol/TestCurrency.json",
+        "package": "@anotherOrg/aPkg",
+        "version": "1.0.2",
+    }
+
+    # Specific version requested, not found
+    assert library._find_ref("@anotherOrg/aPkg/TestCurrency@1.2.0") is None
+
+    # Specific package requested, not found
+    assert library._find_ref("@anotherOrg/package2/TestCurrency") is None
