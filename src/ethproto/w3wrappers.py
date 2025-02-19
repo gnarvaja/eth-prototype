@@ -437,7 +437,7 @@ class W3Provider(BaseProvider):
         self.tx_kwargs = tx_kwargs or {}
 
     def get_contract_def(self, eth_contract):
-        return self.artifact_library.get_artifact_by_name(eth_contract)
+        return self.artifact_library.get_artifact_by_ref(eth_contract)
 
     def get_contract_factory(self, eth_contract):
         contract_def = self.get_contract_def(eth_contract)
