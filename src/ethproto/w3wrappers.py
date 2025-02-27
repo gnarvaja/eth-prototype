@@ -5,9 +5,10 @@ from typing import Iterator, List, Union
 from environs import Env
 from eth_account.account import Account, LocalAccount
 from eth_account.signers.base import BaseAccount
-from eth_utils.abi import event_abi_to_log_topic
+from eth_utils import add_0x_prefix, event_abi_to_log_topic
 from hexbytes import HexBytes
 from web3.contract import Contract
+from web3.contract.contract import ContractEvent
 from web3.exceptions import ContractLogicError, ExtraDataLengthError
 from web3.middleware import ExtraDataToPOAMiddleware
 
@@ -448,7 +449,9 @@ class W3Provider(BaseProvider):
         kwargs["from"] = from_
         return self.construct(factory, init_params, kwargs)
 
-    def get_events(self, eth_wrapper, event_name, filter_kwargs={}):
+    def get_events(
+        self, eth_wrapper, event_names: Union[list[Union[str, ContractEvent]], str], filter_kwargs=None
+    ):
         """Returns a list of events given a filter, like this:
 
         >>> provider.get_events(currencywrapper, "Transfer", dict(from_block=0))
@@ -468,12 +471,36 @@ class W3Provider(BaseProvider):
             'blockNumber': 23
         })]
         """
-        contract = eth_wrapper.contract
-        event = getattr(contract.events, event_name)
-        if "from_block" not in filter_kwargs:
-            filter_kwargs["from_block"] = self.get_first_block(eth_wrapper)
-        event_filter = event.create_filter(**filter_kwargs)
-        return event_filter.get_all_entries()
+        if filter_kwargs is None:
+            filter_kwargs = {}
+
+        if isinstance(event_names, (str, ContractEvent)):
+            # Backwards compatibility, if we don't get a list we're getting a single event name/ref
+            event_names = [event_names]
+
+        topics = {}
+
+        for name in event_names:
+            if isinstance(name, str):
+                # We got a plain event name, let's get the event from the contract
+                event: ContractEvent = getattr(eth_wrapper.contract.events, name)
+            else:
+                # Assume we already got an event reference
+                event: ContractEvent = name
+
+            topics[event.topic] = event
+
+        filter_params = {
+            "fromBlock": filter_kwargs.get("from_block", self.get_first_block(eth_wrapper)),
+            "toBlock": filter_kwargs.get("to_block", "latest"),
+            "address": eth_wrapper.contract.address,
+            "topics": [list(topics.keys())],
+        }
+
+        logs = self.w3.eth.get_logs(filter_params)
+
+        parsed_events = [topics[add_0x_prefix(log["topics"][0].hex())].process_log(log) for log in logs]
+        return parsed_events
 
     def init_eth_wrapper(self, eth_wrapper, owner, init_params, kwargs):
         eth_wrapper.owner = self.address_book.get_account(owner)
