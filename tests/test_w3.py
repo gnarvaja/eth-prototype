@@ -112,6 +112,36 @@ def test_get_events():
     assert event2[0].args.value == 2
 
 
+def test_get_multiple_events():
+    provider = wrappers.get_provider("w3")
+    contract_def = provider.get_contract_def("EventLauncher")
+    wrapper = wrappers.ETHWrapper.build_from_def(contract_def)
+
+    launcher = wrapper(owner="owner")
+
+    launcher.launchEvent1(1)
+    launcher.launchEvent2(2)
+    launcher.launchEvent1(3)
+
+    all_events = provider.get_events(launcher, ["Event1", "Event2"], dict(from_block=0))
+    assert len(all_events) == 3
+
+    all_events_by_reference = provider.get_events(
+        launcher, [launcher.contract.events.Event1, launcher.contract.events.Event2], dict(from_block=0)
+    )
+    assert len(all_events_by_reference) == 3
+
+    all_events_mixed = provider.get_events(
+        launcher, ["Event1", launcher.contract.events.Event2], dict(from_block=0)
+    )
+    assert len(all_events_mixed) == 3
+
+    single_event_by_reference = provider.get_events(
+        launcher, launcher.contract.events.Event1, dict(from_block=0)
+    )
+    assert len(single_event_by_reference) == 2
+
+
 @pytest.fixture
 def sign_and_send(mocker, hardhat_node):
     """Sets up sign-and-send transact mode with a well-known address, returns the address"""
