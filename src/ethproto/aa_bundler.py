@@ -343,6 +343,9 @@ class Bundler:
         self.priority_gas_price_factor = priority_gas_price_factor
         self.base_gas_price_factor = base_gas_price_factor
         self.executor_pk = executor_pk
+
+        # stateOverrideSet mapping to use when calling eth_estimateUserOperationGas
+        # https://docs.alchemy.com/reference/eth-estimateuseroperationgas
         self.overrides = overrides
 
     def __str__(self):
