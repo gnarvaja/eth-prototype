@@ -182,7 +182,8 @@ def test_send_transaction():
 
     def make_request(method, params):
         if method == "eth_estimateUserOperationGas":
-            assert len(params) == 2
+            assert len(params) == 3
+            assert params[2] == {}
             assert params[1] == ENTRYPOINT
             assert params[0] == {
                 "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",

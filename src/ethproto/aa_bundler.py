@@ -14,7 +14,7 @@ from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
-from web3.types import TxParams
+from web3.types import StateOverride, TxParams
 
 from .contracts import RevertError
 
@@ -29,6 +29,8 @@ AA_BUNDLER_GAS_LIMIT_FACTOR = env.float("AA_BUNDLER_GAS_LIMIT_FACTOR", 1)
 AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_BASE_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_BASE_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_VERIFICATION_GAS_FACTOR = env.float("AA_BUNDLER_VERIFICATION_GAS_FACTOR", 1)
+
+AA_BUNDLER_STATE_OVERRIDES = env.json("AA_BUNDLER_STATE_OVERRIDES", default={})
 
 NonceMode = Enum(
     "NonceMode",
@@ -66,6 +68,16 @@ DUMMY_SIGNATURE = HexBytes(
     "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
 )
+
+
+class BundlerRevertError(RevertError):
+    """Bundler specific revert error"""
+
+    def __init__(self, message, userop=None, response=None):
+        super().__init__(message)
+        self.message = message
+        self.userop = userop
+        self.response = response
 
 
 @dataclass(frozen=True)
@@ -288,11 +300,11 @@ def check_nonce_error(resp, retry_nonce):
     if "AA25" in resp["error"]["message"] and AA_BUNDLER_MAX_GETNONCE_RETRIES > 0:
         # Retry fetching the nonce
         if retry_nonce == AA_BUNDLER_MAX_GETNONCE_RETRIES:
-            raise RevertError(resp["error"]["message"])
+            raise BundlerRevertError(resp["error"]["message"], response=resp)
         warn(f'{resp["error"]["message"]} error, I will retry fetching the nonce')
         return (retry_nonce or 0) + 1
     else:
-        raise RevertError(resp["error"]["message"])
+        raise BundlerRevertError(resp["error"]["message"], response=resp)
 
 
 def get_sender(tx):
@@ -318,6 +330,7 @@ class Bundler:
         priority_gas_price_factor: float = AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR,
         base_gas_price_factor: float = AA_BUNDLER_BASE_GAS_PRICE_FACTOR,
         executor_pk: HexBytes = AA_BUNDLER_EXECUTOR_PK,
+        overrides: StateOverride = AA_BUNDLER_STATE_OVERRIDES,
     ):
         self.w3 = w3
         self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[])
@@ -330,6 +343,7 @@ class Bundler:
         self.priority_gas_price_factor = priority_gas_price_factor
         self.base_gas_price_factor = base_gas_price_factor
         self.executor_pk = executor_pk
+        self.overrides = overrides
 
     def __str__(self):
         return (
@@ -364,10 +378,11 @@ class Bundler:
 
     def estimate_user_operation_gas(self, user_operation: UserOperation) -> UserOpEstimation:
         resp = self.bundler.provider.make_request(
-            "eth_estimateUserOperationGas", [user_operation.as_reduced_dict(), self.entrypoint]
+            "eth_estimateUserOperationGas",
+            [user_operation.as_reduced_dict(), self.entrypoint, self.overrides],
         )
         if "error" in resp:
-            raise RevertError(resp["error"]["message"])
+            raise BundlerRevertError(resp["error"]["message"], user_operation, resp)
 
         paymaster_verification_gas_limit = resp["result"].get("paymasterVerificationGasLimit", "0x00")
         return UserOpEstimation(
@@ -386,7 +401,7 @@ class Bundler:
     def alchemy_gas_price(self):
         resp = self.bundler.provider.make_request("rundler_maxPriorityFeePerGas", [])
         if "error" in resp:
-            raise RevertError(resp["error"]["message"])
+            raise BundlerRevertError(resp["error"]["message"], response=resp)
         max_priority_fee_per_gas = int(int(resp["result"], 16) * self.priority_gas_price_factor)
         max_fee_per_gas = max_priority_fee_per_gas + self.get_base_fee()
 
@@ -424,7 +439,14 @@ class Bundler:
             "eth_sendUserOperation", [user_operation.as_dict(), self.entrypoint]
         )
         if "error" in resp:
-            next_nonce = check_nonce_error(resp, retry_nonce)
+            try:
+                next_nonce = check_nonce_error(resp, retry_nonce)
+            except BundlerRevertError as e:
+                raise BundlerRevertError(
+                    e.message,
+                    userop=user_operation,
+                    response=e.response,
+                )
             return self.send_transaction(tx, retry_nonce=next_nonce)
 
         return {"userOpHash": resp["result"]}
