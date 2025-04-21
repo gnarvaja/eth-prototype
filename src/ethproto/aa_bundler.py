@@ -29,6 +29,7 @@ AA_BUNDLER_GAS_LIMIT_FACTOR = env.float("AA_BUNDLER_GAS_LIMIT_FACTOR", 1)
 AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_BASE_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_BASE_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_VERIFICATION_GAS_FACTOR = env.float("AA_BUNDLER_VERIFICATION_GAS_FACTOR", 1)
+AA_BUNDLER_MAX_FEE_PER_GAS = env.int("AA_BUNDLER_MAX_FEE_PER_GAS", 200000000000)  # 200 gwei
 
 AA_BUNDLER_STATE_OVERRIDES = env.json("AA_BUNDLER_STATE_OVERRIDES", default={})
 
@@ -329,6 +330,7 @@ class Bundler:
         gas_limit_factor: float = AA_BUNDLER_GAS_LIMIT_FACTOR,
         priority_gas_price_factor: float = AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR,
         base_gas_price_factor: float = AA_BUNDLER_BASE_GAS_PRICE_FACTOR,
+        max_fee_per_gas: int = AA_BUNDLER_MAX_FEE_PER_GAS,
         executor_pk: HexBytes = AA_BUNDLER_EXECUTOR_PK,
         overrides: StateOverride = AA_BUNDLER_STATE_OVERRIDES,
     ):
@@ -343,6 +345,7 @@ class Bundler:
         self.priority_gas_price_factor = priority_gas_price_factor
         self.base_gas_price_factor = base_gas_price_factor
         self.executor_pk = executor_pk
+        self.max_fee_per_gas = max_fee_per_gas
 
         # stateOverrideSet mapping to use when calling eth_estimateUserOperationGas
         # https://docs.alchemy.com/reference/eth-estimateuseroperationgas
@@ -406,8 +409,15 @@ class Bundler:
         if "error" in resp:
             raise BundlerRevertError(resp["error"]["message"], response=resp)
         max_priority_fee_per_gas = int(int(resp["result"], 16) * self.priority_gas_price_factor)
-        max_fee_per_gas = max_priority_fee_per_gas + self.get_base_fee()
+        max_fee_per_gas = min(max_priority_fee_per_gas + self.get_base_fee(), self.max_fee_per_gas)
 
+        return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
+
+    def generic_gas_price(self):
+        base_fee = self.get_base_fee()
+        priority_fee = self.w3.eth.max_priority_fee
+        max_priority_fee_per_gas = int(priority_fee * self.priority_gas_price_factor)
+        max_fee_per_gas = min(max_priority_fee_per_gas + base_fee, self.max_fee_per_gas)
         return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
     def build_user_operation(self, tx: Tx, retry_nonce=None) -> UserOperation:
@@ -422,16 +432,15 @@ class Bundler:
 
         if self.bundler_type == "alchemy":
             gas_price = self.alchemy_gas_price()
-            user_operation = user_operation.add_gas_price(gas_price)
 
         elif self.bundler_type == "generic":
-            # At the moment generic just prices the gas at 0
-            pass
+            gas_price = self.generic_gas_price()
 
         else:
             warn(f"Unknown bundler_type: {self.bundler_type}")
+            gas_price = GasPrice(0, 0)
 
-        return user_operation
+        return user_operation.add_gas_price(gas_price)
 
     def send_transaction(self, tx: Tx, retry_nonce=None):
         user_operation = self.build_user_operation(tx, retry_nonce).sign(
