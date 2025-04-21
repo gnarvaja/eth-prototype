@@ -356,7 +356,7 @@ class Bundler:
             f"Bundler(type={self.bundler_type}, entrypoint={self.entrypoint}, nonce_mode={self.nonce_mode}, "
             f"fixed_nonce_key={self.fixed_nonce_key}, verification_gas_factor={self.verification_gas_factor}, "
             f"gas_limit_factor={self.gas_limit_factor}, priority_gas_price_factor={self.priority_gas_price_factor}, "
-            f"base_gas_price_factor={self.base_gas_price_factor})"
+            f"base_gas_price_factor={self.base_gas_price_factor}, max_fee_per_gas={self.max_fee_per_gas})"
         )
 
     def get_nonce_and_key(self, tx: Tx, fetch=False):
