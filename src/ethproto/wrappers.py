@@ -17,7 +17,7 @@ DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", None)
 
 ETHERSCAN_TOKEN = env.str("ETHERSCAN_TOKEN", None)
 ETHERSCAN_DOMAIN = env.str("ETHERSCAN_DOMAIN", "api.etherscan.io")
-ETHERSCAN_URL = env.str("ETHERSCAN_URL", "https://{domain}/api?apikey={token}&")
+ETHERSCAN_URL = env.str("ETHERSCAN_URL", "https://{domain}/v2/api?apikey={token}&chainid={chainid}&")
 AMOUNT_DECIMALS = env.int("AMOUNT_DECIMALS", 18)
 AMOUNT_CLASSNAME = env.str("AMOUNT_CLASSNAME", None)
 
@@ -266,7 +266,9 @@ class BaseProvider(ABC):
     def get_etherscan_url(self):
         if ETHERSCAN_TOKEN is None:
             return None
-        return ETHERSCAN_URL.format(token=ETHERSCAN_TOKEN, domain=ETHERSCAN_DOMAIN)
+        return ETHERSCAN_URL.format(
+            token=ETHERSCAN_TOKEN, domain=ETHERSCAN_DOMAIN, chainid=self.w3.eth.chain_id
+        )
 
     def get_first_block(self, eth_wrapper):
         etherscan_url = self.get_etherscan_url()
@@ -275,7 +277,7 @@ class BaseProvider(ABC):
         address = self.get_contract_address(eth_wrapper)
         url = (
             etherscan_url
-            + f"&module=account&action=txlist&address={address}&startblock=0&"
+            + f"module=account&action=txlist&address={address}&startblock=0&"
             + "endblock=99999999&page=1&offset=10&sort=asc"
         )
         resp = requests.get(url)

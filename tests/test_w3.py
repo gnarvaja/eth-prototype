@@ -1,6 +1,9 @@
+import importlib
 import os
+import sys
 
 import pytest
+import responses
 from web3 import Web3
 
 from ethproto import w3wrappers, wrappers
@@ -9,6 +12,28 @@ pytestmark = [
     pytest.mark.skipif(os.environ.get("TEST_ENV", None) != "web3py", reason="web3py-only tests"),
     pytest.mark.usefixtures("local_node_provider"),
 ]
+
+
+@pytest.fixture
+def provider_with_etherscan_env(mocker):
+    mocker.patch.dict(
+        os.environ,
+        {"ETHERSCAN_TOKEN": "abc123", "ETHERSCAN_DOMAIN": "api.etherscan.io"},
+    )
+    sys.modules.pop("ethproto.wrappers", None)
+    sys.modules.pop("ethproto.w3wrappers", None)
+    wrappers = importlib.import_module("ethproto.wrappers")
+    w3wrappers = importlib.import_module("ethproto.w3wrappers")
+
+    w3wrappers.register_w3_provider("w3_test", Web3(Web3.EthereumTesterProvider()))
+    provider = wrappers.get_provider("w3_test")
+
+    return provider
+
+
+class DummyWrapper:
+    address = "0x8e3aab1fc53e8b0f5d987c20b1899a2db3b2f95c"  # random generated address
+    contract = type("Contract", (), {"address": address})()
 
 
 class Counter(wrappers.ETHWrapper):
@@ -182,3 +207,29 @@ def test_sign_and_send_interact_with_existing_contract(sign_and_send):
     assert connected.value() == 1
 
     assert counter.value() == 1  # sanity check
+
+
+def test_get_etherscan_url_v2_format(provider_with_etherscan_env):
+    provider = provider_with_etherscan_env
+    chainid = provider.w3.eth.chain_id
+    assert provider.get_etherscan_url() == f"https://api.etherscan.io/v2/api?apikey=abc123&chainid={chainid}&"
+
+
+@responses.activate
+def test_get_first_block_makes_request(provider_with_etherscan_env):
+    provider = provider_with_etherscan_env
+    address = "0x8e3aab1fc53e8b0f5d987c20b1899a2db3b2f95c"
+    chainid = provider.w3.eth.chain_id
+    responses.get(
+        f"https://api.etherscan.io/v2/api?apikey=abc123&chainid={chainid}&"
+        f"&module=account&action=txlist&address={address}&startblock=0&"
+        "endblock=99999999&page=1&offset=10&sort=asc",
+        json={"status": "1", "message": "OK", "result": [{"blockNumber": "1"}]},
+        status=200,
+    )
+
+    block = provider.get_first_block(DummyWrapper())
+    assert block == 1
+
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url.startswith("https://api.etherscan.io")
