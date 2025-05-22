@@ -18,7 +18,7 @@ pytestmark = [
 def provider_with_etherscan_env(mocker):
     mocker.patch.dict(
         os.environ,
-        {"ETHERSCAN_TOKEN": "abc123", "ETHERSCAN_DOMAIN": "api.etherscan.io", "ETHERSCAN_CHAIN": "137"},
+        {"ETHERSCAN_TOKEN": "abc123", "ETHERSCAN_DOMAIN": "api.etherscan.io"},
     )
     sys.modules.pop("ethproto.wrappers", None)
     sys.modules.pop("ethproto.w3wrappers", None)
@@ -211,16 +211,17 @@ def test_sign_and_send_interact_with_existing_contract(sign_and_send):
 
 def test_get_etherscan_url_v2_format(provider_with_etherscan_env):
     provider = provider_with_etherscan_env
-    assert provider.get_etherscan_url() == "https://api.etherscan.io/v2/api?apikey=abc123&chainid=137&"
+    chainid = provider.w3.eth.chain_id
+    assert provider.get_etherscan_url() == f"https://api.etherscan.io/v2/api?apikey=abc123&chainid={chainid}&"
 
 
 @responses.activate
 def test_get_first_block_makes_request(provider_with_etherscan_env):
     provider = provider_with_etherscan_env
     address = "0x8e3aab1fc53e8b0f5d987c20b1899a2db3b2f95c"
-
+    chainid = provider.w3.eth.chain_id
     responses.get(
-        f"https://api.etherscan.io/v2/api?apikey=abc123&chainid=137&"
+        f"https://api.etherscan.io/v2/api?apikey=abc123&chainid={chainid}&"
         f"&module=account&action=txlist&address={address}&startblock=0&"
         "endblock=99999999&page=1&offset=10&sort=asc",
         json={"status": "1", "message": "OK", "result": [{"blockNumber": "1"}]},
