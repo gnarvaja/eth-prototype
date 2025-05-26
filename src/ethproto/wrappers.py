@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
+from warnings import warn
 
 import requests
 from environs import Env
@@ -283,9 +284,14 @@ class BaseProvider(ABC):
         resp = requests.get(url)
         resp.raise_for_status()
         resp = resp.json()
-        if not resp["result"]:
-            return -1
-        return int(resp["result"][0]["blockNumber"])
+        if resp.get("status") != "1":
+            warn(f"Failed to get first block from {etherscan_url}:  {resp}")
+            return 0
+        try:
+            return int(resp["result"][0]["blockNumber"])
+        except (KeyError, TypeError):
+            warn(f"Failed to parse first block for {address}: {resp}")
+            return 0
 
     def get_contract_address(self, eth_wrapper):
         return eth_wrapper.contract.address
