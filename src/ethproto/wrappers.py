@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from functools import partial
-from warnings import warn
 
 import requests
 from environs import Env
@@ -19,6 +18,8 @@ DEFAULT_PROVIDER = env.str("DEFAULT_PROVIDER", None)
 ETHERSCAN_TOKEN = env.str("ETHERSCAN_TOKEN", None)
 ETHERSCAN_DOMAIN = env.str("ETHERSCAN_DOMAIN", "api.etherscan.io")
 ETHERSCAN_URL = env.str("ETHERSCAN_URL", "https://{domain}/v2/api?apikey={token}&chainid={chainid}&")
+ETHERSCAN_CHAIN_ID = env.int("ETHERSCAN_CHAIN_ID", None)
+
 AMOUNT_DECIMALS = env.int("AMOUNT_DECIMALS", 18)
 AMOUNT_CLASSNAME = env.str("AMOUNT_CLASSNAME", None)
 
@@ -30,6 +31,10 @@ else:
 MAXUINT256 = 2**256 - 1
 
 _providers = {}
+
+
+class EtherscanError(Exception):
+    ...
 
 
 def get_provider(provider_key=None):
@@ -267,9 +272,8 @@ class BaseProvider(ABC):
     def get_etherscan_url(self):
         if ETHERSCAN_TOKEN is None:
             return None
-        return ETHERSCAN_URL.format(
-            token=ETHERSCAN_TOKEN, domain=ETHERSCAN_DOMAIN, chainid=self.w3.eth.chain_id
-        )
+        chain_id = ETHERSCAN_CHAIN_ID or self.w3.eth.chain_id
+        return ETHERSCAN_URL.format(token=ETHERSCAN_TOKEN, domain=ETHERSCAN_DOMAIN, chainid=chain_id)
 
     def get_first_block(self, eth_wrapper):
         etherscan_url = self.get_etherscan_url()
@@ -285,13 +289,11 @@ class BaseProvider(ABC):
         resp.raise_for_status()
         resp = resp.json()
         if resp.get("status") != "1":
-            warn(f"Failed to get first block from {etherscan_url}:  {resp}")
-            return 0
+            raise EtherscanError(f"Failed to get first block from {etherscan_url}:  {resp}")
         try:
             return int(resp["result"][0]["blockNumber"])
         except (KeyError, TypeError):
-            warn(f"Failed to parse first block for {address}: {resp}")
-            return 0
+            raise EtherscanError(f"Failed to parse first block for {address}: {resp}")
 
     def get_contract_address(self, eth_wrapper):
         return eth_wrapper.contract.address
