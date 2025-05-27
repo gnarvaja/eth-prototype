@@ -5,11 +5,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from hexbytes import HexBytes
-from web3.auto import w3
+from web3 import HTTPProvider, Web3
 from web3.constants import HASH_ZERO
+from web3.middleware import ExtraDataToPOAMiddleware
 
 from ethproto import aa_bundler
 from ethproto.test_utils import factories
+
+
+@pytest.fixture
+def w3():
+    w3 = Web3(HTTPProvider("http://example.org"))
+    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    return w3
 
 
 def test_pack_two():
@@ -166,8 +174,8 @@ def test_get_nonce_with_local_cache(fetch_nonce_mock, randint_mock):
         fetch_nonce_mock.assert_not_called()
 
 
-def test_send_transaction():
-    w3 = MagicMock()
+def test_send_transaction(w3):
+    w3.eth = MagicMock()
     w3.eth.chain_id = CHAIN_ID
 
     tx = aa_bundler.Tx(
@@ -275,7 +283,8 @@ def test_random_key_nonces_are_thread_safe():
 
 
 @pytest.mark.vcr
-def test_build_user_operation():
+def test_build_user_operation(w3):
+
     tx = aa_bundler.Tx(
         value=0,
         chain_id=137,
