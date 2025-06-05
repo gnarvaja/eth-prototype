@@ -250,6 +250,10 @@ class ArtifactLibrary:
         Calling with contract_ref <ContractClass>@local is the same as calling get_artifact_by_name(<ContractClass>).
         """
         ref = self._find_ref(contract_ref)
+        if ref is None:
+            by_name = self.get_artifact_by_name(contract_ref)
+            if by_name is not None:
+                return by_name
 
         if ref is None:
             raise FileNotFoundError(f"Could not find artifact for {contract_ref} on {self.lookup_paths}")
