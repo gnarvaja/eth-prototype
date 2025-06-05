@@ -125,6 +125,14 @@ def test_artifact_libraries_generator():
     assert libraries == []
 
 
+def test_artifact_library_ref_lookup_fallback():
+    library = ArtifactLibrary(
+        os.path.join(HARDHAT_PROJECT, "artifacts", "contracts", "Counter.sol"),
+    )
+
+    assert library.get_artifact_by_ref("Counter") == library.get_artifact_by_name("Counter")
+
+
 def test_artifact_library_ref_lookup():
     library = ArtifactLibrary(
         os.path.join(HARDHAT_PROJECT, "artifacts"),
