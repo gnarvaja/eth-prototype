@@ -140,6 +140,8 @@ def _connected_contract_address(eth_wrapper_class, *args, **kwargs):
 
 
 ERC20TokenAlternatives = [ERC20Token]
+ERC20TokenAlternatives.append(partial(ERC20Token, use_custom_errors=False))
+ERC20TokenAlternatives.append(partial(ERC20Token, use_custom_errors=True))
 
 if "web3py" in TEST_ENV:
     ERC20TokenAlternatives.append(partial(TestCurrency, provider_key="w3"))
@@ -215,8 +217,13 @@ class TestERC20Token:
         token.transfer_from("Spender", "owner", "Giacomo", _W(300))
         assert token.allowance("owner", "Spender") == _W(0)
 
-        with pytest.raises(RevertError):
-            token.transfer_from("Spender", "owner", "Luca", _W(1))
+        with pytest.raises(RevertError, match="allowance|ERC20InsufficientAllowance"):
+            try:
+                token.transfer_from("Spender", "owner", "Luca", _W(1))
+            except RevertError as err:
+                if getattr(token, "use_custom_errors", False):
+                    assert str(err).startswith("ERC20InsufficientAllowance(")
+                raise
 
         assert token.balance_of("Guillo") == _W(200)
         assert token.balance_of("owner") == _W(1500)
@@ -225,6 +232,8 @@ class TestERC20Token:
 
 
 ERC721TokenAlternatives = [ERC721Token]
+ERC721TokenAlternatives.append(partial(ERC721Token, use_custom_errors=False))
+ERC721TokenAlternatives.append(partial(ERC721Token, use_custom_errors=True))
 if "web3py" in TEST_ENV:
     ERC721TokenAlternatives.append(partial(TestNFT, provider_key="w3"))
 
@@ -242,7 +251,7 @@ class TestERC721Token:
         assert nft.owner_of(1235) == "CUST1"
         nft.burn("CUST1", 1235)
         assert nft.balance_of("CUST1") == 1
-        with pytest.raises(RevertError, match="ERC721: invalid token ID"):
+        with pytest.raises(RevertError, match="ERC721: invalid token ID|ERC721NonexistentToken"):
             nft.owner_of(1235)
         nft.burn("CUST1", 1234)
         assert nft.balance_of("CUST1") == 0
@@ -297,5 +306,12 @@ class TestERC721Token:
         assert nft.balance_of("CUST2") == 2
         nft.set_approval_for_all("CUST1", "SPEND", False)
 
-        with pytest.raises(RevertError, match="ERC721: caller is not token owner or approved"):
+        with pytest.raises(
+            RevertError,
+            match=(
+                "ERC721InsufficientApproval"
+                if getattr(nft, "use_custom_errors", False)
+                else "ERC721: caller is not token owner"
+            ),
+        ):
             nft.transfer_from("SPEND", "CUST1", "CUST2", 1235)
