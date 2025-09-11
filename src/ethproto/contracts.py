@@ -386,45 +386,37 @@ class ERC20Token(AccessControlContract):
 
     _total_supply = WadField(default=ZERO)
 
+    _arg_count_by_error = {
+        "ERC20InsufficientBalance": 3,
+        "ERC20InvalidSender": 1,
+        "ERC20InvalidReceiver": 1,
+        "ERC20InsufficientAllowance": 3,
+        "ERC20InvalidApprover": 1,
+        "ERC20InvalidSpender": 1,
+    }
+
+    _message_by_error = {
+        "ERC20InsufficientBalance": "ERC20: transfer amount exceeds balance",
+        "ERC20InvalidSender": "ERC20: transfer from the zero address",
+        "ERC20InvalidReceiver": "ERC20: transfer to the zero address",
+        "ERC20InsufficientAllowance": "ERC20: insufficient allowance",
+        "ERC20InvalidApprover": "ERC20: approve from the zero address",
+        "ERC20InvalidSpender": "ERC20: approve to the zero address",
+    }
+
     def _error(self, error_class, *args) -> RevertError:
-        if error_class == "ERC20InsufficientBalance":
-            if self.use_custom_errors:
-                return RevertCustomError(error_class, args[0], args[1], args[2])
-            else:
-                return RevertError("ERC20: transfer amount exceeds balance")
-        elif error_class == "ERC20InvalidSender":
-            if self.use_custom_errors:
+        if self.use_custom_errors:
+            arg_count = self._arg_count_by_error.get(error_class, None)
+            if arg_count == 1:
                 return RevertCustomError(
                     error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
                 )
-            else:
-                return RevertError("ERC20: transfer from the zero address")
-        elif error_class == "ERC20InvalidReceiver":
-            if self.use_custom_errors:
-                return RevertCustomError(
-                    error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
-                )
-            else:
-                return RevertError("ERC20: transfer to the zero address")
-        elif error_class == "ERC20InsufficientAllowance":
-            if self.use_custom_errors:
-                return RevertCustomError(error_class, args[0], args[1], args[2])
-            else:
-                return RevertError("ERC20: insufficient allowance")
-        elif error_class == "ERC20InvalidApprover":
-            if self.use_custom_errors:
-                return RevertCustomError(
-                    error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
-                )
-            else:
-                return RevertError("ERC20: approve from the zero address")
-        elif error_class == "ERC20InvalidSpender":
-            if self.use_custom_errors:
-                return RevertCustomError(
-                    error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
-                )
-            else:
-                return RevertError("ERC20: approve to the zero address")
+            elif arg_count is not None:
+                return RevertCustomError(error_class, *args[:arg_count])
+        else:
+            message = self._message_by_error.get(error_class, None)
+            if message is not None:
+                return RevertError(message)
         return super()._error(error_class, *args)
 
     def __init__(self, **kwargs):
@@ -542,43 +534,37 @@ class ERC721Token(AccessControlContract):  # NFT
 
     _token_count = IntField(default=0)
 
+    _arg_count_by_error = {
+        "ERC721InvalidOwner": 1,
+        "ERC721NonexistentToken": 1,
+        "ERC721IncorrectOwner": 3,
+        "ERC721InvalidSender": 1,
+        "ERC721InvalidReceiver": 1,
+        "ERC721InsufficientApproval": 2,
+    }
+
+    _message_by_error = {
+        "ERC721InvalidOwner": "ERC721: address zero is not a valid owner",
+        "ERC721NonexistentToken": "ERC721: invalid token ID",
+        "ERC721IncorrectOwner": "ERC721: transfer from incorrect owner",
+        "ERC721InvalidSender": "ERC721: transfer from incorrect owner",
+        "ERC721InvalidReceiver": "ERC721: transfer to the zero address",
+        "ERC721InsufficientApproval": "ERC721: caller is not token owner nor approved",
+    }
+
     def _error(self, error_class, *args) -> RevertError:
-        if error_class == "ERC721InvalidOwner":
-            if self.use_custom_errors:
+        if self.use_custom_errors:
+            arg_count = self._arg_count_by_error.get(error_class, None)
+            if arg_count == 1:
                 return RevertCustomError(
                     error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
                 )
-            else:
-                return RevertError("ERC721: address zero is not a valid owner")
-        elif error_class == "ERC721NonexistentToken":
-            if self.use_custom_errors:
-                return RevertCustomError(error_class, args[0])
-            else:
-                return RevertError("ERC721: invalid token ID")
-        elif error_class == "ERC721IncorrectOwner":
-            if self.use_custom_errors:
-                return RevertCustomError(error_class, args[0], args[1], args[2])
-            else:
-                return RevertError("ERC721: transfer from incorrect owner")
-        elif error_class == "ERC721InvalidSender":
-            if self.use_custom_errors:
-                return RevertCustomError(
-                    error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
-                )
-            else:
-                return RevertError("ERC721: transfer from incorrect owner")
-        elif error_class == "ERC721InvalidReceiver":
-            if self.use_custom_errors:
-                return RevertCustomError(
-                    error_class, args[0] if args else "0x0000000000000000000000000000000000000000"
-                )
-            else:
-                return RevertError("ERC721: transfer to the zero address")
-        elif error_class == "ERC721InsufficientApproval":
-            if self.use_custom_errors:
-                return RevertCustomError(error_class, args[0], args[1])
-            else:
-                return RevertError("ERC721: caller is not token owner nor approved")
+            elif arg_count is not None:
+                return RevertCustomError(error_class, *args[:arg_count])
+        else:
+            message = self._message_by_error.get(error_class, None)
+            if message is not None:
+                return RevertError(message)
         return super()._error(error_class, *args)
 
     @external
