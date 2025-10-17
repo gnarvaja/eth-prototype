@@ -1,5 +1,5 @@
 import os
-from collections import defaultdict
+from itertools import groupby
 from typing import Iterator, List, Union
 
 from environs import Env
@@ -246,30 +246,27 @@ class ReceiptWrapper:
         self._receipt = receipt
         self._contract = contract
 
+    def _find_event(self, contract, topic0):
+        for event in contract.events:
+            evt = event()
+            if HexBytes(event_abi_to_log_topic(evt.abi)) == topic0:
+                return evt
+        return None  # Not found
+
     @property
     def events(self):
         if not hasattr(self, "_events"):
-            # Lookup the events in all known contracts
-            addresses = [log.address for log in self._receipt.logs]
-            contracts = {addr: _contract_map[addr] for addr in addresses if addr in _contract_map}
-            topic_map = {
-                HexBytes(event_abi_to_log_topic(event().abi)): event()
-                for contract in contracts.values()
-                for event in contract.events
+            addr_topic0 = [(log.address, log.topics[0] if log.topics else None) for log in self._receipt.logs]
+            # find uniq event types
+            events = {topic0: self._find_event(_contract_map[addr], topic0) for (addr, topic0) in addr_topic0}
+            parsed_logs = sum(
+                [list(evt.process_receipt(self._receipt)) for evt in events.values() if evt is not None], []
+            )
+            parsed_logs.sort(key=lambda x: x.event)
+            self._events = {
+                evt_name: EventItem(evt_name, [pl.args for pl in parsed_logs_for_evt_name])
+                for (evt_name, parsed_logs_for_evt_name) in groupby(parsed_logs, key=lambda x: x.event)
             }
-
-            parsed_logs = []
-            for log in self._receipt.logs:
-                for topic in log.topics:
-                    if topic in topic_map:
-                        parsed_logs += topic_map[topic].process_receipt(self._receipt)
-
-            evts = defaultdict(list)
-            for evt in parsed_logs:
-                evt_name = evt.event
-                evt_params = evt.args
-                evts[evt_name].append(evt_params)
-            self._events = {k: EventItem(k, v) for k, v in evts.items()}
         return self._events
 
     def __getattr__(self, attr_name):
