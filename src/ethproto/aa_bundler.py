@@ -13,6 +13,7 @@ from eth_account.messages import encode_defunct
 from eth_typing import HexAddress
 from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
+from requests import HTTPError
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
 from web3.types import StateOverride, TxParams
@@ -461,23 +462,30 @@ class Bundler:
         )
 
     def alchemy_estimation(self, user_operation: UserOperation) -> AlchemyGasAndPaymasterAndData:
-        resp = self.bundler.provider.make_request(
-            "alchemy_requestGasAndPaymasterAndData",
-            [
-                {
-                    "policyId": self.alchemy_gas_policy_id,
-                    "entryPoint": self.entrypoint,
-                    "dummySignature": DUMMY_SIGNATURE,
-                    "userOperation": user_operation.as_reduced_dict(),
-                    "overrides": {
-                        "maxFeePerGas": {"multiplier": self.base_gas_price_factor},
-                        "maxPriorityFeePerGas": {"multiplier": self.priority_gas_price_factor},
-                        "callGasLimit": {"multiplier": self.gas_limit_factor},
-                        "verificationGasLimit": {"multiplier": self.verification_gas_factor},
-                    },
-                }
-            ],
-        )
+        try:
+            resp = self.bundler.provider.make_request(
+                "alchemy_requestGasAndPaymasterAndData",
+                [
+                    {
+                        "policyId": self.alchemy_gas_policy_id,
+                        "entryPoint": self.entrypoint,
+                        "dummySignature": DUMMY_SIGNATURE,
+                        "userOperation": user_operation.as_reduced_dict(),
+                        "overrides": {
+                            "maxFeePerGas": {"multiplier": self.base_gas_price_factor},
+                            "maxPriorityFeePerGas": {"multiplier": self.priority_gas_price_factor},
+                            "callGasLimit": {"multiplier": self.gas_limit_factor},
+                            "verificationGasLimit": {"multiplier": self.verification_gas_factor},
+                        },
+                    }
+                ],
+            )
+        except HTTPError as e:
+            raise BundlerRevertError(
+                f"HTTP error while requesting gas and paymaster data: {str(e)}",
+                userop=user_operation,
+                response=e.response,
+            ) from e
 
         if "error" in resp:
             raise BundlerRevertError(resp["error"]["message"], userop=user_operation, response=resp)
