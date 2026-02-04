@@ -50,7 +50,6 @@ user_operation = aa_bundler.UserOperation(
     pre_verification_gas=999999,
     max_fee_per_gas=1000000000,
     max_priority_fee_per_gas=1000000000,
-    paymaster_and_data="0x",
     signature="0x",
 )
 
@@ -189,62 +188,63 @@ def test_send_transaction(w3):
     )
 
     def make_request(method, params):
-        if method == "eth_estimateUserOperationGas":
-            assert len(params) == 3
-            assert params[2] == {}
-            assert params[1] == ENTRYPOINT
-            assert params[0] == {
-                "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
-                "nonce": "0x0",
-                "callData": "0xb61d27f60000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000",  # noqa
-                "signature": "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c",  # noqa
-            }
+        if method == "alchemy_requestGasAndPaymasterAndData":
+            assert len(params) == 1
+            assert params[0]["policyId"] == "01234567-89ab-cdef-0123-456789abcdef"
+            assert "overrides" in params[0]
             return {
                 "jsonrpc": "2.0",
-                "id": 1,
+                "id": 2,
                 "result": {
-                    "preVerificationGas": "0xb430",
-                    "callGasLimit": "0xcbb8",
+                    "callGasLimit": "0xcbb8 ",
+                    "paymasterVerificationGasLimit": "0x9afa",
+                    "paymasterPostOpGasLimit": "0x0",
                     "verificationGasLimit": "0x13664",
-                    "paymasterVerificationGasLimit": None,
+                    "maxPriorityFeePerGas": "0x7ffffffff",
+                    "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
+                    "maxFeePerGas": "0x7ffffffff",
+                    "paymasterData": "0x01234567",
+                    "preVerificationGas": "0xb430",
                 },
             }
-        elif method == "rundler_maxPriorityFeePerGas":
-            assert len(params) == 0
-            return {"jsonrpc": "2.0", "id": 1, "result": "0x7ffffffff"}
         elif method == "eth_sendUserOperation":
             assert len(params) == 2
             assert params[1] == ENTRYPOINT
             assert params[0] == {
                 "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
                 "nonce": "0x0",
+                "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
+                "paymasterData": HexBytes("0x01234567"),
+                "paymasterPostOpGasLimit": "0x0",
+                "paymasterVerificationGasLimit": "0x9afa",
                 "callData": "0xb61d27f60000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000",  # noqa
                 "callGasLimit": "0xcbb8",
                 "verificationGasLimit": "0x13664",
                 "preVerificationGas": "0xb430",
                 "maxFeePerGas": "0x7ffffffff",
                 "maxPriorityFeePerGas": "0x7ffffffff",
-                "signature": "0x7980544d044bc1202fed7edec96f2fa795ab8670b439935e6bbb5104e95d84ea32af8bff187913ff7eb2b442baab06d0c300273942e312332659ab0a194bbbe81c",  # noqa
+                "signature": "0x4656e37ed587521b667b3f02fe079dc0be8600d527bb30824570ee5499f19af37354bbaa140a7e933f8d6d6c5a4ba1a23ffbcf49c43980b1a113947102d7dfe21b",  # noqa
             }
             return {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "result": "0xa950a17ca1ed83e974fb1aa227360a007cb65f566518af117ffdbb04d8d2d524",
             }
+        else:
+            raise ValueError(f"Unexpected method {method} called")
 
     bundler = aa_bundler.Bundler(
         w3,
         executor_pk=TEST_PRIVATE_KEY,
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
         fixed_nonce_key=0,
+        bundler_type="alchemy",
+        alchemy_gas_policy_id="01234567-89ab-cdef-0123-456789abcdef",
     )
     make_request_mock = MagicMock(side_effect=make_request)
-    get_base_fee_mock = MagicMock(return_value=0)
     bundler.bundler.provider.make_request = make_request_mock
-    bundler.get_base_fee = get_base_fee_mock
 
     ret = bundler.send_transaction(tx)
-    get_base_fee_mock.assert_called_once_with()
     assert aa_bundler.NONCE_CACHE[0] == 1
     assert ret == {"userOpHash": "0xa950a17ca1ed83e974fb1aa227360a007cb65f566518af117ffdbb04d8d2d524"}
 
@@ -284,7 +284,6 @@ def test_random_key_nonces_are_thread_safe():
 
 @pytest.mark.vcr
 def test_build_user_operation(w3):
-
     tx = aa_bundler.Tx(
         value=0,
         chain_id=137,
@@ -301,6 +300,8 @@ def test_build_user_operation(w3):
         fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
         executor_pk=TEST_PRIVATE_KEY,
         entrypoint=ENTRYPOINT,
+        bundler_type="alchemy",
+        alchemy_gas_policy_id="d80ed67a-d8bc-4cd1-90ad-b50e0a58c93e",
     ).build_user_operation(tx)
 
     assert userop.as_dict() == {
@@ -313,15 +314,21 @@ def test_build_user_operation(w3):
             "ffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000"
             "00000000000000"
         ),
-        "callGasLimit": "0xcbb8",
-        "maxFeePerGas": "0x89e80ffda",
-        "maxPriorityFeePerGas": "0x7aef40a00",
+        "callGasLimit": "0xd912",
+        "maxFeePerGas": "0x18754a776ce",
+        "maxPriorityFeePerGas": "0x74c9b09800",
         "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
-        "preVerificationGas": "0xb5c8",
+        "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
+        "paymasterData": HexBytes(
+            "0x00000000000000006982d1843b144832bbf805ad7b7faa66b0514bc1f500ae5753543e4d7e90dc70f6f2aa6c3feef96f01d93e16a30da16e4513d2705ca79263d9d9884161a15bbee7d95c151b"  # noqa
+        ),
+        "paymasterPostOpGasLimit": "0x0",
+        "paymasterVerificationGasLimit": "0x9b37",
+        "preVerificationGas": "0xbd54",
         "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
         "signature": (
             "0xfffffffffffffffffffffffffffffff00000000000000000000000000000000"
             "07aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
         ),
-        "verificationGasLimit": "0x1365b",
+        "verificationGasLimit": "0xac76",
     }
