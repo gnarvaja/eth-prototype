@@ -214,7 +214,7 @@ def test_send_transaction(w3):
                 "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
                 "nonce": "0x0",
                 "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
-                "paymasterData": HexBytes("0x01234567"),
+                "paymasterData": "0x01234567",
                 "paymasterPostOpGasLimit": "0x0",
                 "paymasterVerificationGasLimit": "0x9afa",
                 "callData": "0xb61d27f60000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000",  # noqa
@@ -319,9 +319,7 @@ def test_build_user_operation(w3):
         "maxPriorityFeePerGas": "0x74c9b09800",
         "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
         "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
-        "paymasterData": HexBytes(
-            "0x00000000000000006982d1843b144832bbf805ad7b7faa66b0514bc1f500ae5753543e4d7e90dc70f6f2aa6c3feef96f01d93e16a30da16e4513d2705ca79263d9d9884161a15bbee7d95c151b"  # noqa
-        ),
+        "paymasterData": "0x00000000000000006982d1843b144832bbf805ad7b7faa66b0514bc1f500ae5753543e4d7e90dc70f6f2aa6c3feef96f01d93e16a30da16e4513d2705ca79263d9d9884161a15bbee7d95c151b",  # noqa
         "paymasterPostOpGasLimit": "0x0",
         "paymasterVerificationGasLimit": "0x9b37",
         "preVerificationGas": "0xbd54",
