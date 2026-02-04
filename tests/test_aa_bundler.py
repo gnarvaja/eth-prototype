@@ -315,11 +315,11 @@ def test_build_user_operation(w3):
             "00000000000000"
         ),
         "callGasLimit": "0xd912",
-        "maxFeePerGas": "0x18754a776ce",
-        "maxPriorityFeePerGas": "0x74c9b09800",
+        "maxFeePerGas": "0xbaad142eb6",
+        "maxPriorityFeePerGas": "0x7aef40a00",
         "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
         "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
-        "paymasterData": "0x00000000000000006982d1843b144832bbf805ad7b7faa66b0514bc1f500ae5753543e4d7e90dc70f6f2aa6c3feef96f01d93e16a30da16e4513d2705ca79263d9d9884161a15bbee7d95c151b",  # noqa
+        "paymasterData": "0x00000000000000006982f2961b02e25cb873537d0a2383b9665992667628a8d22f8223e7951b2f6d2aeae55e03af6a6ec9774cf4303980e7e3b2ecab9b65a8bcce8aabe4fd89b81c0facdb4f1b",  # noqa
         "paymasterPostOpGasLimit": "0x0",
         "paymasterVerificationGasLimit": "0x9b37",
         "preVerificationGas": "0xbd54",

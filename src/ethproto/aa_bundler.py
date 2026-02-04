@@ -486,7 +486,7 @@ class Bundler:
             raise BundlerRevertError(
                 f"HTTP error while requesting gas and paymaster data: {str(e)}",
                 userop=user_operation,
-                response=e.response.json(),
+                response=e.response.text,
             ) from e
 
         if "error" in resp:
