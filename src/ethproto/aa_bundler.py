@@ -198,7 +198,7 @@ class UserOperation:
             "maxFeePerGas": "0x%x" % self.max_fee_per_gas,
             "signature": add_0x_prefix(self.signature.hex()),
             "paymaster": self.paymaster,
-            "paymasterData": self.paymaster_data,
+            "paymasterData": self.paymaster_data.to_0x_hex(),
             "paymasterVerificationGasLimit": "0x%x" % self.paymaster_verification_gas_limit,
             "paymasterPostOpGasLimit": "0x%x" % self.paymaster_post_op_gas_limit,
         }
@@ -442,7 +442,7 @@ class Bundler:
     def estimate_user_operation_gas(self, user_operation: UserOperation) -> UserOpEstimation:
         resp = self.bundler.provider.make_request(
             "eth_estimateUserOperationGas",
-            [user_operation.as_reduced_dict(), self.entrypoint, self.overrides],
+            [user_operation.as_dict(), self.entrypoint, self.overrides],
         )
         if "error" in resp:
             raise BundlerRevertError(resp["error"]["message"], user_operation, resp)
@@ -477,6 +477,8 @@ class Bundler:
                             "callGasLimit": {"multiplier": self.gas_limit_factor},
                             "verificationGasLimit": {"multiplier": self.verification_gas_factor},
                         },
+                        # Alchemy seems to be ignoring this, even though it's documented
+                        "stateOverrideSet": self.overrides,
                     }
                 ],
             )
@@ -484,7 +486,7 @@ class Bundler:
             raise BundlerRevertError(
                 f"HTTP error while requesting gas and paymaster data: {str(e)}",
                 userop=user_operation,
-                response=e.response,
+                response=e.response.json(),
             ) from e
 
         if "error" in resp:
@@ -524,6 +526,35 @@ class Bundler:
             paymaster_and_data=paymaster_and_data,
         )
 
+    def pimlico_gas_price(self):
+        resp = self.bundler.provider.make_request("pimlico_getUserOperationGasPrice", [])
+        if "error" in resp:
+            raise BundlerRevertError(resp["error"]["message"], response=resp)
+        # {
+        #   "jsonrpc": "2.0",
+        #   "id": 1,
+        #   "result": {
+        #           "slow": {
+        #           "maxFeePerGas": "0x829b42b5",
+        #           "maxPriorityFeePerGas": "0x829b42b5"
+        #       },
+        #           "standard": {
+        #           "maxFeePerGas": "0x88d36a75",
+        #           "maxPriorityFeePerGas": "0x88d36a75"
+        #       },
+        #           "fast": {
+        #           "maxFeePerGas": "0x8f0b9234",
+        #           "maxPriorityFeePerGas": "0x8f0b9234"
+        #       }
+        #   }
+        # }
+        priority_fee = int(resp["result"]["standard"]["maxPriorityFeePerGas"], 16)
+        total_fee = int(resp["result"]["standard"]["maxFeePerGas"], 16)
+        base_fee = total_fee - priority_fee
+        max_priority_fee_per_gas = int(priority_fee * self.priority_gas_price_factor)
+        max_fee_per_gas = min(max_priority_fee_per_gas + base_fee, self.max_fee_per_gas)
+        return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
+
     def generic_gas_price(self):
         base_fee = self.get_base_fee()
         priority_fee = self.w3.eth.max_priority_fee
@@ -546,6 +577,15 @@ class Bundler:
             user_operation = user_operation.add_paymaster_and_data(
                 estimation_and_paymaster.paymaster_and_data
             )
+
+        elif self.bundler_type == "pimlico":
+            estimation = self.estimate_user_operation_gas(user_operation)
+
+            user_operation = user_operation.add_estimation(estimation)
+
+            gas_price = self.pimlico_gas_price()
+
+            user_operation = user_operation.add_gas_price(gas_price)
 
         elif self.bundler_type == "generic":
             estimation = self.estimate_user_operation_gas(user_operation)
