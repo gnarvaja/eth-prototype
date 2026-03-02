@@ -7,11 +7,13 @@ from warnings import warn
 
 from environs import Env
 from eth_abi import encode
+from eth_abi.packed import encode_packed
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_typing import HexAddress
 from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
+from requests import HTTPError
 from web3 import Web3
 from web3.constants import ADDRESS_ZERO
 from web3.types import StateOverride, TxParams
@@ -20,11 +22,11 @@ from .contracts import RevertError
 
 env = Env()
 
-AA_BUNDLER_URL = env.str("AA_BUNDLER_URL", env.str("WEB3_PROVIDER_URI", "http://localhost:8545"))
+AA_BUNDLER_URL = env.str("AA_BUNDLER_URL", env.str("WEB3_PROVIDER_URI", None))
 AA_BUNDLER_SENDER = env.str("AA_BUNDLER_SENDER", None)
 AA_BUNDLER_ENTRYPOINT = env.str("AA_BUNDLER_ENTRYPOINT", "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
 AA_BUNDLER_EXECUTOR_PK = env.str("AA_BUNDLER_EXECUTOR_PK", None)
-AA_BUNDLER_PROVIDER = env.str("AA_BUNDLER_PROVIDER", "alchemy")
+AA_BUNDLER_PROVIDER = env.str("AA_BUNDLER_PROVIDER", "generic")
 AA_BUNDLER_GAS_LIMIT_FACTOR = env.float("AA_BUNDLER_GAS_LIMIT_FACTOR", 1)
 AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_PRIORITY_GAS_PRICE_FACTOR", 1)
 AA_BUNDLER_BASE_GAS_PRICE_FACTOR = env.float("AA_BUNDLER_BASE_GAS_PRICE_FACTOR", 1)
@@ -47,7 +49,7 @@ NonceMode = Enum(
 AA_BUNDLER_NONCE_MODE = env.enum("AA_BUNDLER_NONCE_MODE", default="FIXED_KEY_LOCAL_NONCE", enum=NonceMode)
 AA_BUNDLER_NONCE_KEY = env.int("AA_BUNDLER_NONCE_KEY", 0)
 AA_BUNDLER_MAX_GETNONCE_RETRIES = env.int("AA_BUNDLER_MAX_GETNONCE_RETRIES", 3)
-
+AA_BUNDLER_ALCHEMY_GAS_POLICY_ID = env.str("AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", None)
 
 GET_NONCE_ABI = [
     {
@@ -81,6 +83,10 @@ class BundlerRevertError(RevertError):
         self.response = response
 
 
+class BundlerError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class UserOpEstimation:
     """eth_estimateUserOperationGas response"""
@@ -95,6 +101,21 @@ class UserOpEstimation:
 class GasPrice:
     max_priority_fee_per_gas: int
     max_fee_per_gas: int
+
+
+@dataclass(frozen=True)
+class PaymasterAndData:
+    paymaster: HexAddress
+    paymaster_data: HexBytes
+    paymaster_verification_gas_limit: int
+    paymaster_post_op_gas_limit: int
+
+
+@dataclass(frozen=True)
+class AlchemyGasAndPaymasterAndData:
+    estimation: UserOpEstimation
+    gas_price: GasPrice
+    paymaster_and_data: PaymasterAndData
 
 
 @dataclass(frozen=True)
@@ -141,7 +162,11 @@ class UserOperation:
     signature: HexBytes = DUMMY_SIGNATURE
 
     init_code: HexBytes = HexBytes("0x")
-    paymaster_and_data: HexBytes = HexBytes("0x")
+
+    paymaster: HexAddress = None
+    paymaster_data: HexBytes = HexBytes("0x")
+    paymaster_verification_gas_limit: int = 0
+    paymaster_post_op_gas_limit: int = 0
 
     @classmethod
     def from_tx(cls, tx: Tx, nonce):
@@ -172,6 +197,10 @@ class UserOperation:
             "maxPriorityFeePerGas": "0x%x" % self.max_priority_fee_per_gas,
             "maxFeePerGas": "0x%x" % self.max_fee_per_gas,
             "signature": add_0x_prefix(self.signature.hex()),
+            "paymaster": self.paymaster,
+            "paymasterData": self.paymaster_data.to_0x_hex(),
+            "paymasterVerificationGasLimit": "0x%x" % self.paymaster_verification_gas_limit,
+            "paymasterPostOpGasLimit": "0x%x" % self.paymaster_post_op_gas_limit,
         }
 
     def add_estimation(self, estimation: UserOpEstimation) -> "UserOperation":
@@ -187,6 +216,15 @@ class UserOperation:
             self,
             max_priority_fee_per_gas=gas_price.max_priority_fee_per_gas,
             max_fee_per_gas=gas_price.max_fee_per_gas,
+        )
+
+    def add_paymaster_and_data(self, paymaster_and_data: PaymasterAndData) -> "UserOperation":
+        return replace(
+            self,
+            paymaster=paymaster_and_data.paymaster,
+            paymaster_data=paymaster_and_data.paymaster_data,
+            paymaster_verification_gas_limit=paymaster_and_data.paymaster_verification_gas_limit,
+            paymaster_post_op_gas_limit=paymaster_and_data.paymaster_post_op_gas_limit,
         )
 
     def sign(self, private_key: HexBytes, chain_id, entrypoint) -> "UserOperation":
@@ -225,7 +263,21 @@ class PackedUserOperation:
             pre_verification_gas=user_operation.pre_verification_gas,
             gas_fees=pack_two(user_operation.max_priority_fee_per_gas, user_operation.max_fee_per_gas),
             init_code=user_operation.init_code,
-            paymaster_and_data=user_operation.paymaster_and_data,
+            paymaster_and_data=(
+                HexBytes(
+                    encode_packed(
+                        ["address", "uint128", "uint128", "bytes"],
+                        [
+                            user_operation.paymaster,
+                            user_operation.paymaster_verification_gas_limit,
+                            user_operation.paymaster_post_op_gas_limit,
+                            user_operation.paymaster_data,
+                        ],
+                    )
+                )
+                if user_operation.paymaster is not None
+                else HexBytes("0x")
+            ).to_0x_hex(),
             signature=user_operation.signature,
         )
 
@@ -333,9 +385,10 @@ class Bundler:
         max_fee_per_gas: int = AA_BUNDLER_MAX_FEE_PER_GAS,
         executor_pk: HexBytes = AA_BUNDLER_EXECUTOR_PK,
         overrides: StateOverride = AA_BUNDLER_STATE_OVERRIDES,
+        alchemy_gas_policy_id: str = AA_BUNDLER_ALCHEMY_GAS_POLICY_ID,
     ):
         self.w3 = w3
-        self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[])
+        self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[]) if bundler_url else w3
         self.bundler_type = bundler_type
         self.entrypoint = entrypoint
         self.nonce_mode = nonce_mode
@@ -350,6 +403,10 @@ class Bundler:
         # stateOverrideSet mapping to use when calling eth_estimateUserOperationGas
         # https://docs.alchemy.com/reference/eth-estimateuseroperationgas
         self.overrides = overrides
+
+        if alchemy_gas_policy_id is None and bundler_type == "alchemy":
+            raise BundlerError("Must provide alchemy_gas_policy_id when using alchemy bundler_type")
+        self.alchemy_gas_policy_id = alchemy_gas_policy_id
 
     def __str__(self):
         return (
@@ -385,7 +442,7 @@ class Bundler:
     def estimate_user_operation_gas(self, user_operation: UserOperation) -> UserOpEstimation:
         resp = self.bundler.provider.make_request(
             "eth_estimateUserOperationGas",
-            [user_operation.as_reduced_dict(), self.entrypoint, self.overrides],
+            [user_operation.as_dict(), self.entrypoint, self.overrides],
         )
         if "error" in resp:
             raise BundlerRevertError(resp["error"]["message"], user_operation, resp)
@@ -404,13 +461,98 @@ class Bundler:
             ),
         )
 
-    def alchemy_gas_price(self):
-        resp = self.bundler.provider.make_request("rundler_maxPriorityFeePerGas", [])
+    def alchemy_estimation(self, user_operation: UserOperation) -> AlchemyGasAndPaymasterAndData:
+        try:
+            resp = self.bundler.provider.make_request(
+                "alchemy_requestGasAndPaymasterAndData",
+                [
+                    {
+                        "policyId": self.alchemy_gas_policy_id,
+                        "entryPoint": self.entrypoint,
+                        "dummySignature": DUMMY_SIGNATURE,
+                        "userOperation": user_operation.as_reduced_dict(),
+                        "overrides": {
+                            "maxFeePerGas": {"multiplier": self.base_gas_price_factor},
+                            "maxPriorityFeePerGas": {"multiplier": self.priority_gas_price_factor},
+                            "callGasLimit": {"multiplier": self.gas_limit_factor},
+                            "verificationGasLimit": {"multiplier": self.verification_gas_factor},
+                        },
+                        # Alchemy seems to be ignoring this, even though it's documented
+                        "stateOverrideSet": self.overrides,
+                    }
+                ],
+            )
+        except HTTPError as e:
+            raise BundlerRevertError(
+                f"HTTP error while requesting gas and paymaster data: {str(e)}",
+                userop=user_operation,
+                response=e.response.text,
+            ) from e
+
+        if "error" in resp:
+            raise BundlerRevertError(resp["error"]["message"], userop=user_operation, response=resp)
+
+        # {
+        #     "callGasLimit": "0x3dab",
+        #     "paymasterVerificationGasLimit": "0x9afa",
+        #     "paymasterPostOpGasLimit": "0x0",
+        #     "verificationGasLimit": "0xac33",
+        #     "maxPriorityFeePerGas": "0x7aef40a00",
+        #     "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
+        #     "maxFeePerGas": "0xaf9fe62e48",
+        #     "paymasterData": "0xabcd...",
+        #     "preVerificationGas": "0xb8ec"
+        #   }
+
+        estimation = UserOpEstimation(
+            pre_verification_gas=int(resp["result"]["preVerificationGas"], 16),
+            verification_gas_limit=int(resp["result"]["verificationGasLimit"], 16),
+            call_gas_limit=int(resp["result"]["callGasLimit"], 16),
+            paymaster_verification_gas_limit=int(resp["result"]["paymasterVerificationGasLimit"], 16),
+        )
+        gas_price = GasPrice(
+            max_priority_fee_per_gas=int(resp["result"]["maxPriorityFeePerGas"], 16),
+            max_fee_per_gas=int(resp["result"]["maxFeePerGas"], 16),
+        )
+        paymaster_and_data = PaymasterAndData(
+            paymaster=resp["result"]["paymaster"],
+            paymaster_data=HexBytes(resp["result"]["paymasterData"]),
+            paymaster_verification_gas_limit=int(resp["result"]["paymasterVerificationGasLimit"], 16),
+            paymaster_post_op_gas_limit=int(resp["result"]["paymasterPostOpGasLimit"], 16),
+        )
+        return AlchemyGasAndPaymasterAndData(
+            estimation=estimation,
+            gas_price=gas_price,
+            paymaster_and_data=paymaster_and_data,
+        )
+
+    def pimlico_gas_price(self):
+        resp = self.bundler.provider.make_request("pimlico_getUserOperationGasPrice", [])
         if "error" in resp:
             raise BundlerRevertError(resp["error"]["message"], response=resp)
-        max_priority_fee_per_gas = int(int(resp["result"], 16) * self.priority_gas_price_factor)
-        max_fee_per_gas = min(max_priority_fee_per_gas + self.get_base_fee(), self.max_fee_per_gas)
-
+        # {
+        #   "jsonrpc": "2.0",
+        #   "id": 1,
+        #   "result": {
+        #           "slow": {
+        #           "maxFeePerGas": "0x829b42b5",
+        #           "maxPriorityFeePerGas": "0x829b42b5"
+        #       },
+        #           "standard": {
+        #           "maxFeePerGas": "0x88d36a75",
+        #           "maxPriorityFeePerGas": "0x88d36a75"
+        #       },
+        #           "fast": {
+        #           "maxFeePerGas": "0x8f0b9234",
+        #           "maxPriorityFeePerGas": "0x8f0b9234"
+        #       }
+        #   }
+        # }
+        priority_fee = int(resp["result"]["standard"]["maxPriorityFeePerGas"], 16)
+        total_fee = int(resp["result"]["standard"]["maxFeePerGas"], 16)
+        base_fee = total_fee - priority_fee
+        max_priority_fee_per_gas = int(priority_fee * self.priority_gas_price_factor)
+        max_fee_per_gas = min(max_priority_fee_per_gas + base_fee, self.max_fee_per_gas)
         return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
     def generic_gas_price(self):
@@ -426,21 +568,38 @@ class Bundler:
         consume_nonce(nonce_key, nonce)
 
         user_operation = UserOperation.from_tx(tx, make_nonce(nonce_key, nonce))
-        estimation = self.estimate_user_operation_gas(user_operation)
-
-        user_operation = user_operation.add_estimation(estimation)
 
         if self.bundler_type == "alchemy":
-            gas_price = self.alchemy_gas_price()
+            estimation_and_paymaster = self.alchemy_estimation(user_operation)
+
+            user_operation = user_operation.add_estimation(estimation_and_paymaster.estimation)
+            user_operation = user_operation.add_gas_price(estimation_and_paymaster.gas_price)
+            user_operation = user_operation.add_paymaster_and_data(
+                estimation_and_paymaster.paymaster_and_data
+            )
+
+        elif self.bundler_type == "pimlico":
+            estimation = self.estimate_user_operation_gas(user_operation)
+
+            user_operation = user_operation.add_estimation(estimation)
+
+            gas_price = self.pimlico_gas_price()
+
+            user_operation = user_operation.add_gas_price(gas_price)
 
         elif self.bundler_type == "generic":
+            estimation = self.estimate_user_operation_gas(user_operation)
+
+            user_operation = user_operation.add_estimation(estimation)
+
             gas_price = self.generic_gas_price()
 
-        else:
-            warn(f"Unknown bundler_type: {self.bundler_type}")
-            gas_price = GasPrice(0, 0)
+            user_operation = user_operation.add_gas_price(gas_price)
 
-        return user_operation.add_gas_price(gas_price)
+        else:
+            raise BundlerError(f"Unknown bundler_type: {self.bundler_type}")
+
+        return user_operation
 
     def send_transaction(self, tx: Tx, retry_nonce=None):
         user_operation = self.build_user_operation(tx, retry_nonce).sign(
@@ -462,3 +621,9 @@ class Bundler:
             return self.send_transaction(tx, retry_nonce=next_nonce)
 
         return {"userOpHash": resp["result"]}
+
+    def get_user_operation(self, user_op_hash):
+        resp = self.bundler.provider.make_request("eth_getUserOperationByHash", [user_op_hash])
+        if "error" in resp:
+            raise BundlerRevertError(resp["error"]["message"], response=resp)
+        return resp["result"]
