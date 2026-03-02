@@ -22,7 +22,7 @@ from .contracts import RevertError
 
 env = Env()
 
-AA_BUNDLER_URL = env.str("AA_BUNDLER_URL", env.str("WEB3_PROVIDER_URI", "http://localhost:8545"))
+AA_BUNDLER_URL = env.str("AA_BUNDLER_URL", env.str("WEB3_PROVIDER_URI", None))
 AA_BUNDLER_SENDER = env.str("AA_BUNDLER_SENDER", None)
 AA_BUNDLER_ENTRYPOINT = env.str("AA_BUNDLER_ENTRYPOINT", "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
 AA_BUNDLER_EXECUTOR_PK = env.str("AA_BUNDLER_EXECUTOR_PK", None)
@@ -388,7 +388,7 @@ class Bundler:
         alchemy_gas_policy_id: str = AA_BUNDLER_ALCHEMY_GAS_POLICY_ID,
     ):
         self.w3 = w3
-        self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[])
+        self.bundler = Web3(Web3.HTTPProvider(bundler_url), middleware=[]) if bundler_url else w3
         self.bundler_type = bundler_type
         self.entrypoint = entrypoint
         self.nonce_mode = nonce_mode
@@ -621,3 +621,9 @@ class Bundler:
             return self.send_transaction(tx, retry_nonce=next_nonce)
 
         return {"userOpHash": resp["result"]}
+
+    def get_user_operation(self, user_op_hash):
+        resp = self.bundler.provider.make_request("eth_getUserOperationByHash", [user_op_hash])
+        if "error" in resp:
+            raise BundlerRevertError(resp["error"]["message"], response=resp)
+        return resp["result"]
