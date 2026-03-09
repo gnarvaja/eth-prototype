@@ -330,3 +330,58 @@ def test_build_user_operation(w3):
         ),
         "verificationGasLimit": "0xac76",
     }
+
+
+@pytest.mark.vcr
+def test_build_user_operation_execute_user_op(w3):
+    tx = aa_bundler.Tx(
+        value=0,
+        chain_id=137,
+        from_="0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        target="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+        data=HexBytes(
+            # 0x095ea7b3 -> approve(address,uint256)
+            "0x095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"  # noqa
+        ),
+    )
+
+    userop = aa_bundler.Bundler(
+        w3,
+        bundler_url="https://bundler.example.com/rpc",
+        nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
+        fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
+        executor_pk=TEST_PRIVATE_KEY,
+        entrypoint=ENTRYPOINT,
+        bundler_type="generic",
+        use_execute_user_op=True,
+    ).build_user_operation(tx)
+
+    assert userop.as_dict() == {
+        "callData": (
+            "0x8dd7712f"  # executeUserOp selector
+            # followed by payload (address dest, uint256 value, bytes calldata)
+            "0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174"  # dest
+            "0000000000000000000000000000000000000000000000000000000000000000"  # value
+            "0000000000000000000000000000000000000000000000000000000000000060"  # calldata offset
+            "0000000000000000000000000000000000000000000000000000000000000044"  # calldata length
+            "095ea7b3"  # Inner call starts here: approve(address,uint256)
+            "0000000000000000000000007ace242f32208d836a2245df957c08547059bf45"
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            "00000000000000000000000000000000000000000000000000000000"  # padding for 32 byte alignment
+        ),
+        "callGasLimit": "0x10282",
+        "maxFeePerGas": "0x1a3df05188",
+        "maxPriorityFeePerGas": "0x645849ef5",
+        "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
+        "paymaster": None,
+        "paymasterData": "0x",
+        "paymasterPostOpGasLimit": "0x0",
+        "paymasterVerificationGasLimit": "0x0",
+        "preVerificationGas": "0xc0fe",
+        "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+        "signature": (
+            "0xfffffffffffffffffffffffffffffff00000000000000000000000000000000"
+            "07aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+        ),
+        "verificationGasLimit": "0x16471",
+    }
