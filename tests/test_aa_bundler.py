@@ -296,6 +296,7 @@ def test_build_user_operation(w3):
 
     userop = aa_bundler.Bundler(
         w3,
+        bundler_url="https://bundler.example.com/rpc",
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
         fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
         executor_pk=TEST_PRIVATE_KEY,
@@ -349,7 +350,7 @@ def test_build_user_operation_execute_user_op(w3):
         w3,
         bundler_url="https://bundler.example.com/rpc",
         nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
-        fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
+        fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32452,
         executor_pk=TEST_PRIVATE_KEY,
         entrypoint=ENTRYPOINT,
         bundler_type="generic",
@@ -372,7 +373,7 @@ def test_build_user_operation_execute_user_op(w3):
         "callGasLimit": "0x10282",
         "maxFeePerGas": "0x1a3df05188",
         "maxPriorityFeePerGas": "0x645849ef5",
-        "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
+        "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324520000000000000000",
         "paymaster": None,
         "paymasterData": "0x",
         "paymasterPostOpGasLimit": "0x0",

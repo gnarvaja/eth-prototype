@@ -1,7 +1,7 @@
 interactions:
   - request:
       body: '{"jsonrpc": "2.0", "method": "eth_estimateUserOperationGas", "params":
-        [{"sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9", "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
+        [{"sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9", "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324520000000000000000",
         "callData": "0x8dd7712f0000000000000000000000002791bca1f2de4661ed88a30c99a7a9449aa84174000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000044095ea7b30000000000000000000000007ace242f32208d836a2245df957c08547059bf45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000",
         "callGasLimit": "0x0", "verificationGasLimit": "0x0", "preVerificationGas":
         "0x0", "maxPriorityFeePerGas": "0x0", "maxFeePerGas": "0x0", "signature": "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c",
@@ -22,7 +22,7 @@ interactions:
         User-Agent:
           - web3.py/7.14.1/web3.providers.rpc.rpc.HTTPProvider
       method: POST
-      uri: https://bundler.example.com/rpc
+      uri: https://bundler.example.com
     response:
       body:
         string: '{"jsonrpc":"2.0","id":0,"result":{"preVerificationGas":"0xc0fe","verificationGasLimit":"0x16471","callGasLimit":"0x10282","paymasterVerificationGasLimit":"0x0","paymasterPostOpGasLimit":"0x0"}}'
