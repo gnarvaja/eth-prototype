@@ -18,6 +18,12 @@ def json_rpc_matcher(r1, r2):
     r1_body = json.loads(r1.body)
     r2_body = json.loads(r2.body)
 
-    assert r1_body["jsonrpc"] == r2_body["jsonrpc"] == "2.0"
-    assert r1_body["method"] == r2_body["method"]
-    assert r1_body["params"] == r2_body["params"]
+    assert (
+        r1_body["jsonrpc"] == r2_body["jsonrpc"] == "2.0"
+    ), f"JSON-RPC mismatch: {r1_body['jsonrpc']} != {r2_body['jsonrpc']}"
+    assert (
+        r1_body["method"] == r2_body["method"]
+    ), f"Method mismatch: {r1_body['method']} != {r2_body['method']}"
+    assert (
+        r1_body["params"] == r2_body["params"]
+    ), f"Param mismatch: {r1_body['params']} != {r2_body['params']}"
