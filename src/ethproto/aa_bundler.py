@@ -10,7 +10,7 @@ from eth_abi import encode
 from eth_abi.packed import encode_packed
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from eth_typing import HexAddress
+from eth_typing import ChecksumAddress, HexAddress
 from eth_utils import add_0x_prefix, function_signature_to_4byte_selector
 from hexbytes import HexBytes
 from requests import HTTPError
@@ -148,6 +148,8 @@ class Tx:
 class UserOperation:
     EXECUTE_ARG_TYPES = ["address", "uint256", "bytes"]
     EXECUTE_SELECTOR = function_signature_to_4byte_selector(f"execute({','.join(EXECUTE_ARG_TYPES)})")
+
+    EXECUTE_USEROP_ARG_TYPES = ["address", "address", "uint256", "bytes"]
     EXECUTE_USEROP_SELECTOR = function_signature_to_4byte_selector(
         #               PackedUserOperation struct
         "executeUserOp((address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes),bytes32)"
@@ -174,12 +176,24 @@ class UserOperation:
     paymaster_post_op_gas_limit: int = 0
 
     @classmethod
-    def from_tx(cls, tx: Tx, nonce, execute_user_op=False):
-        selector = cls.EXECUTE_USEROP_SELECTOR if execute_user_op else cls.EXECUTE_SELECTOR
+    def from_tx(cls, tx: Tx, nonce, execute_user_op_context=None):
+        if execute_user_op_context is not None:
+            call_data = add_0x_prefix(
+                (
+                    cls.EXECUTE_USEROP_SELECTOR
+                    + encode(
+                        cls.EXECUTE_USEROP_ARG_TYPES, [execute_user_op_context, tx.target, tx.value, tx.data]
+                    )
+                ).hex()
+            )
+        else:
+            call_data = add_0x_prefix(
+                (cls.EXECUTE_SELECTOR + encode(cls.EXECUTE_ARG_TYPES, tx.as_execute_args())).hex()
+            )
         return cls(
             sender=get_sender(tx),
             nonce=nonce,
-            call_data=add_0x_prefix((selector + encode(cls.EXECUTE_ARG_TYPES, tx.as_execute_args())).hex()),
+            call_data=call_data,
         )
 
     def as_reduced_dict(self):
@@ -402,7 +416,7 @@ class Bundler:
         self.gas_limit_factor = gas_limit_factor
         self.priority_gas_price_factor = priority_gas_price_factor
         self.base_gas_price_factor = base_gas_price_factor
-        self.executor_pk = executor_pk
+        self.account = Account.from_key(executor_pk) if executor_pk else None
         self.max_fee_per_gas = max_fee_per_gas
 
         # stateOverrideSet mapping to use when calling eth_estimateUserOperationGas
@@ -420,8 +434,14 @@ class Bundler:
             f"fixed_nonce_key={self.fixed_nonce_key}, verification_gas_factor={self.verification_gas_factor}, "
             f"gas_limit_factor={self.gas_limit_factor}, priority_gas_price_factor={self.priority_gas_price_factor}, "
             f"base_gas_price_factor={self.base_gas_price_factor}, max_fee_per_gas={self.max_fee_per_gas}), "
-            f"use_execute_user_op={self.use_execute_user_op}"
+            f"use_execute_user_op={self.use_execute_user_op}, signer={self.account.address if self.account else None}"
         )
+
+    @property
+    def execute_user_op_context(self) -> ChecksumAddress:
+        if self.use_execute_user_op and self.account:
+            return self.account.address
+        return None
 
     def get_nonce_and_key(self, tx: Tx, fetch=False):
         nonce_key = tx.nonce_key
@@ -575,7 +595,7 @@ class Bundler:
         consume_nonce(nonce_key, nonce)
 
         user_operation = UserOperation.from_tx(
-            tx, make_nonce(nonce_key, nonce), execute_user_op=self.use_execute_user_op
+            tx, make_nonce(nonce_key, nonce), execute_user_op_context=self.execute_user_op_context
         )
 
         if self.bundler_type == "alchemy":
@@ -612,7 +632,7 @@ class Bundler:
 
     def send_transaction(self, tx: Tx, retry_nonce=None):
         user_operation = self.build_user_operation(tx, retry_nonce).sign(
-            self.executor_pk, tx.chain_id, self.entrypoint
+            self.account.key, tx.chain_id, self.entrypoint
         )
 
         resp = self.bundler.provider.make_request(
