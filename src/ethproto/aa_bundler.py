@@ -579,19 +579,18 @@ class Bundler:
         total_fee = int(resp["result"]["standard"]["maxFeePerGas"], 16)
         base_fee = total_fee - priority_fee
         max_priority_fee_per_gas = int(priority_fee * self.priority_gas_price_factor)
-        max_fee_per_gas = min(max_priority_fee_per_gas + base_fee, self.max_fee_per_gas)
+        max_fee_per_gas = max_priority_fee_per_gas + base_fee
         return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
     def generic_gas_price(self):
         base_fee = self.get_base_fee()
         priority_fee = self.w3.eth.max_priority_fee
         max_priority_fee_per_gas = int(priority_fee * self.priority_gas_price_factor)
-        max_fee_per_gas = min(max_priority_fee_per_gas + base_fee, self.max_fee_per_gas)
+        max_fee_per_gas = max_priority_fee_per_gas + base_fee
         return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
-    def build_user_operation(self, tx: Tx, retry_nonce=None) -> UserOperation:
+    def build_user_operation(self, tx: Tx, retry_nonce=None, enable_cap=True) -> UserOperation:
         nonce_key, nonce = self.get_nonce_and_key(tx, fetch=retry_nonce is not None)
-        # Consume the nonce, even if the userop may fail later
         consume_nonce(nonce_key, nonce)
 
         user_operation = UserOperation.from_tx(
@@ -613,7 +612,11 @@ class Bundler:
             user_operation = user_operation.add_estimation(estimation)
 
             gas_price = self.pimlico_gas_price()
-
+            if enable_cap:
+                gas_price = GasPrice(
+                    max_priority_fee_per_gas=gas_price.max_priority_fee_per_gas,
+                    max_fee_per_gas=min(gas_price.max_fee_per_gas, self.max_fee_per_gas),
+                )
             user_operation = user_operation.add_gas_price(gas_price)
 
         elif self.bundler_type == "generic":
@@ -622,7 +625,11 @@ class Bundler:
             user_operation = user_operation.add_estimation(estimation)
 
             gas_price = self.generic_gas_price()
-
+            if enable_cap:
+                gas_price = GasPrice(
+                    max_priority_fee_per_gas=gas_price.max_priority_fee_per_gas,
+                    max_fee_per_gas=min(gas_price.max_fee_per_gas, self.max_fee_per_gas),
+                )
             user_operation = user_operation.add_gas_price(gas_price)
 
         else:
@@ -634,21 +641,14 @@ class Bundler:
         user_operation = self.build_user_operation(tx, retry_nonce).sign(
             self.account.key, tx.chain_id, self.entrypoint
         )
+        return self.send_user_operation(user_operation)
 
+    def send_user_operation(self, user_operation: UserOperation):
         resp = self.bundler.provider.make_request(
             "eth_sendUserOperation", [user_operation.as_dict(), self.entrypoint]
         )
         if "error" in resp:
-            try:
-                next_nonce = check_nonce_error(resp, retry_nonce)
-            except BundlerRevertError as e:
-                raise BundlerRevertError(
-                    e.message,
-                    userop=user_operation,
-                    response=e.response,
-                )
-            return self.send_transaction(tx, retry_nonce=next_nonce)
-
+            raise BundlerRevertError(resp["error"]["message"], userop=user_operation, response=resp)
         return {"userOpHash": resp["result"]}
 
     def get_user_operation(self, user_op_hash):
