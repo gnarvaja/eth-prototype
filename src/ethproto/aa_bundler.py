@@ -3,7 +3,6 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from enum import Enum
 from threading import local
-from warnings import warn
 
 from environs import Env
 from eth_abi import encode
@@ -48,7 +47,6 @@ NonceMode = Enum(
 
 AA_BUNDLER_NONCE_MODE = env.enum("AA_BUNDLER_NONCE_MODE", default="FIXED_KEY_LOCAL_NONCE", enum=NonceMode)
 AA_BUNDLER_NONCE_KEY = env.int("AA_BUNDLER_NONCE_KEY", 0)
-AA_BUNDLER_MAX_GETNONCE_RETRIES = env.int("AA_BUNDLER_MAX_GETNONCE_RETRIES", 3)
 AA_BUNDLER_ALCHEMY_GAS_POLICY_ID = env.str("AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", None)
 AA_BUNDLER_USE_EXECUTE_USER_OP = env.bool("AA_BUNDLER_USE_EXECUTE_USER_OP", False)
 
@@ -85,6 +83,12 @@ class BundlerRevertError(RevertError):
 
 
 class BundlerError(Exception):
+    pass
+
+
+class NonceError(BundlerRevertError):
+    """Raised when the bundler returns an AA25 invalid account nonce error."""
+
     pass
 
 
@@ -364,18 +368,9 @@ def consume_nonce(nonce_key, nonce):
     NONCE_CACHE[nonce_key] = max(NONCE_CACHE[nonce_key], nonce + 1)
 
 
-def check_nonce_error(resp, retry_nonce):
-    """Returns the next nonce if resp contains a nonce error and retries weren't exhausted
-    Raises RevertError otherwise
-    """
-    if "AA25" in resp["error"]["message"] and AA_BUNDLER_MAX_GETNONCE_RETRIES > 0:
-        # Retry fetching the nonce
-        if retry_nonce == AA_BUNDLER_MAX_GETNONCE_RETRIES:
-            raise BundlerRevertError(resp["error"]["message"], response=resp)
-        warn(f'{resp["error"]["message"]} error, I will retry fetching the nonce')
-        return (retry_nonce or 0) + 1
-    else:
-        raise BundlerRevertError(resp["error"]["message"], response=resp)
+def is_nonce_error(resp):
+    """Check if a bundler response contains an AA25 nonce error."""
+    return "error" in resp and "AA25" in resp["error"]["message"]
 
 
 def get_sender(tx):
@@ -589,8 +584,8 @@ class Bundler:
         max_fee_per_gas = max_priority_fee_per_gas + base_fee
         return GasPrice(max_priority_fee_per_gas=max_priority_fee_per_gas, max_fee_per_gas=max_fee_per_gas)
 
-    def build_user_operation(self, tx: Tx, retry_nonce=None, enable_cap=True) -> UserOperation:
-        nonce_key, nonce = self.get_nonce_and_key(tx, fetch=retry_nonce is not None)
+    def build_user_operation(self, tx: Tx, enable_cap=True) -> UserOperation:
+        nonce_key, nonce = self.get_nonce_and_key(tx)
         consume_nonce(nonce_key, nonce)
 
         user_operation = UserOperation.from_tx(
@@ -637,10 +632,8 @@ class Bundler:
 
         return user_operation
 
-    def send_transaction(self, tx: Tx, retry_nonce=None):
-        user_operation = self.build_user_operation(tx, retry_nonce).sign(
-            self.account.key, tx.chain_id, self.entrypoint
-        )
+    def send_transaction(self, tx: Tx):
+        user_operation = self.build_user_operation(tx).sign(self.account.key, tx.chain_id, self.entrypoint)
         return self.send_user_operation(user_operation)
 
     def send_user_operation(self, user_operation: UserOperation):
@@ -648,6 +641,8 @@ class Bundler:
             "eth_sendUserOperation", [user_operation.as_dict(), self.entrypoint]
         )
         if "error" in resp:
+            if is_nonce_error(resp):
+                raise NonceError(resp["error"]["message"], userop=user_operation, response=resp)
             raise BundlerRevertError(resp["error"]["message"], userop=user_operation, response=resp)
         return {"userOpHash": resp["result"]}
 
