@@ -120,13 +120,14 @@ def transact(provider, function, tx_kwargs):
         tx = function.build_transaction(tx_kwargs)
         return send_transaction(tx)
     elif W3_TRANSACT_MODE == "aa-bundler-async":
-        from .aa_bundler import send_transaction
+        from .aa_bundler import Bundler, Tx
 
         tx_kwargs |= provider.tx_kwargs
         # To avoid fetching gas and gasPrice in a standard way, when it's not relevant for user ops
         tx_kwargs.update(dict(gas=0, gasPrice=0))
         tx = function.build_transaction(tx_kwargs)
-        return send_transaction(provider.w3, tx)
+        bundler = Bundler(provider.w3)
+        return bundler.send_transaction(Tx.from_tx_params(tx))
     else:
         raise RuntimeError(f"Unknown W3_TRANSACT_MODE {W3_TRANSACT_MODE}")
 
