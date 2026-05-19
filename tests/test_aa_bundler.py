@@ -503,7 +503,7 @@ def test_send_transaction(w3):
             bundler_type="alchemy",
         )
     make_request_mock = MagicMock(side_effect=make_request)
-    bundler.bundler.provider.make_request = make_request_mock
+    bundler.bundler_w3.provider.make_request = make_request_mock
 
     ret = bundler.send_transaction(tx)
     assert aa_bundler.NONCE_CACHE[0] == 1
@@ -690,8 +690,8 @@ def _make_mock_bundler(w3=None):
 
     mock = MagicMock()
     mock.w3 = w3
-    mock.bundler = MagicMock()
-    mock.bundler.provider = MagicMock()
+    mock.bundler_w3 = MagicMock()
+    mock.bundler_w3.provider = MagicMock()
     mock.entrypoint = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
     mock.overrides = {}
     mock.verification_gas_factor = 1.0
@@ -733,7 +733,7 @@ def test_pimlico_gas_strategy():
         result = strategy.estimate_gas_limits(MagicMock())
         assert result == estimation
 
-    mock_bundler.bundler.provider.make_request.return_value = {
+    mock_bundler.bundler_w3.provider.make_request.return_value = {
         "result": {
             "standard": {
                 "maxPriorityFeePerGas": "0x3b9aca00",  # 1 gwei
@@ -762,7 +762,7 @@ def test_alchemy_gas_strategy():
             "paymaster": "0x1234567890123456789012345678901234567890",
             "paymasterData": "0xdeadbeef",
         }
-        mock_bundler.bundler.provider.make_request.return_value = {"result": mock_result}
+        mock_bundler.bundler_w3.provider.make_request.return_value = {"result": mock_result}
 
         uo = MagicMock()
         uo.as_reduced_dict.return_value = {}
@@ -779,10 +779,10 @@ def test_alchemy_gas_strategy():
         pm = strategy.estimate_paymaster(uo)
         assert pm.paymaster == "0x1234567890123456789012345678901234567890"
 
-        assert mock_bundler.bundler.provider.make_request.call_count == 1
+        assert mock_bundler.bundler_w3.provider.make_request.call_count == 1
 
         strategy.estimate_gas_limits(uo)
-        assert mock_bundler.bundler.provider.make_request.call_count == 1
+        assert mock_bundler.bundler_w3.provider.make_request.call_count == 1
 
 
 def test_alchemy_gas_strategy_no_policy_id():
