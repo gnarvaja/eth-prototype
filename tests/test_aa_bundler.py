@@ -69,6 +69,266 @@ def test_pack_user_operation():
     assert aa_bundler.PackedUserOperation.from_user_operation(user_operation) == expected
 
 
+def test_packed_user_operation_as_dict_direct():
+    packed = aa_bundler.PackedUserOperation(
+        sender=TEST_SENDER,
+        nonce=0,
+        init_code="0x",
+        call_data=TEST_CALL_DATA,
+        account_gas_limits="0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        pre_verification_gas=999999,
+        gas_fees="0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        paymaster_and_data="0x",
+        signature="0x",
+    )
+    assert packed.as_dict() == {
+        "sender": HexBytes(TEST_SENDER),
+        "nonce": "0x0",
+        "initCode": "0x",
+        "callData": HexBytes(TEST_CALL_DATA),
+        "accountGasLimits": "0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        "preVerificationGas": "0xf423f",
+        "gasFees": "0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        "paymasterAndData": "0x",
+        "signature": "0x",
+    }
+
+
+def test_packed_user_operation_as_dict_from_user_op():
+    packed = aa_bundler.PackedUserOperation.from_user_operation(user_operation)
+    assert packed.as_dict() == {
+        "sender": HexBytes(TEST_SENDER),
+        "nonce": "0x0",
+        "initCode": "0x",
+        "callData": HexBytes(TEST_CALL_DATA),
+        "accountGasLimits": "0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        "preVerificationGas": "0xf423f",
+        "gasFees": "0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        "paymasterAndData": "0x",
+        "signature": "0x",
+    }
+
+
+def test_user_operation_as_dict():
+    uo = aa_bundler.UserOperation(
+        sender=TEST_SENDER,
+        nonce=0xAE85,
+        init_code=HexBytes("0xdead"),
+        call_data=TEST_CALL_DATA,
+        call_gas_limit=50000,
+        verification_gas_limit=60000,
+        pre_verification_gas=70000,
+        max_fee_per_gas=1000000000,
+        max_priority_fee_per_gas=2000000000,
+        signature=HexBytes("0xbeef"),
+        paymaster="0x1111111111111111111111111111111111111111",
+        paymaster_data=HexBytes("0xcafe"),
+        paymaster_verification_gas_limit=80000,
+        paymaster_post_op_gas_limit=90000,
+    )
+    assert uo.as_dict() == {
+        "sender": TEST_SENDER,
+        "nonce": "0xae85",
+        "initCode": "0xdead",
+        "callData": TEST_CALL_DATA,
+        "callGasLimit": "0xc350",
+        "verificationGasLimit": "0xea60",
+        "preVerificationGas": "0x11170",
+        "maxFeePerGas": "0x3b9aca00",
+        "maxPriorityFeePerGas": "0x77359400",
+        "signature": "0xbeef",
+        "paymaster": "0x1111111111111111111111111111111111111111",
+        "paymasterData": "0xcafe",
+        "paymasterVerificationGasLimit": "0x13880",
+        "paymasterPostOpGasLimit": "0x15f90",
+    }
+
+
+def test_user_operation_as_dict_defaults():
+    uo = aa_bundler.UserOperation(
+        sender=TEST_SENDER,
+        nonce=0,
+        call_data=TEST_CALL_DATA,
+    )
+    assert uo.as_dict() == {
+        "sender": TEST_SENDER,
+        "nonce": "0x0",
+        "initCode": "0x",
+        "callData": TEST_CALL_DATA,
+        "callGasLimit": "0x0",
+        "verificationGasLimit": "0x0",
+        "preVerificationGas": "0x0",
+        "maxFeePerGas": "0x0",
+        "maxPriorityFeePerGas": "0x0",
+        "signature": (
+            "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+        ),
+        "paymaster": None,
+        "paymasterData": "0x",
+        "paymasterVerificationGasLimit": "0x0",
+        "paymasterPostOpGasLimit": "0x0",
+    }
+
+
+def test_user_operation_from_dict():
+    d = {
+        "sender": TEST_SENDER,
+        "nonce": "0xae85",
+        "initCode": "0xdead",
+        "callData": TEST_CALL_DATA,
+        "callGasLimit": "0xc350",
+        "verificationGasLimit": "0xea60",
+        "preVerificationGas": "0x11170",
+        "maxFeePerGas": "0x3b9aca00",
+        "maxPriorityFeePerGas": "0x77359400",
+        "signature": "0xbeef",
+        "paymaster": "0x1111111111111111111111111111111111111111",
+        "paymasterData": "0xcafe",
+        "paymasterVerificationGasLimit": "0x13880",
+        "paymasterPostOpGasLimit": "0x15f90",
+    }
+    uo = aa_bundler.UserOperation.from_dict(d)
+    assert uo.sender == HexBytes(TEST_SENDER)
+    assert uo.nonce == 0xAE85
+    assert uo.init_code == HexBytes("0xdead")
+    assert uo.call_data == HexBytes(TEST_CALL_DATA)
+    assert uo.call_gas_limit == 50000
+    assert uo.verification_gas_limit == 60000
+    assert uo.pre_verification_gas == 70000
+    assert uo.max_fee_per_gas == 1000000000
+    assert uo.max_priority_fee_per_gas == 2000000000
+    assert uo.signature == HexBytes("0xbeef")
+    assert uo.paymaster == "0x1111111111111111111111111111111111111111"
+    assert uo.paymaster_data == HexBytes("0xcafe")
+    assert uo.paymaster_verification_gas_limit == 80000
+    assert uo.paymaster_post_op_gas_limit == 90000
+
+
+def test_user_operation_from_dict_defaults():
+    d = {
+        "sender": TEST_SENDER,
+        "nonce": "0x0",
+        "initCode": "0x",
+        "callData": TEST_CALL_DATA,
+        "callGasLimit": "0x0",
+        "verificationGasLimit": "0x0",
+        "preVerificationGas": "0x0",
+        "maxFeePerGas": "0x0",
+        "maxPriorityFeePerGas": "0x0",
+        "signature": (
+            "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+        ),
+        "paymaster": None,
+        "paymasterData": "0x",
+        "paymasterVerificationGasLimit": "0x0",
+        "paymasterPostOpGasLimit": "0x0",
+    }
+    uo = aa_bundler.UserOperation.from_dict(d)
+    assert uo.sender == HexBytes(TEST_SENDER)
+    assert uo.nonce == 0
+    assert uo.init_code == HexBytes("0x")
+    assert uo.call_data == HexBytes(TEST_CALL_DATA)
+    assert uo.call_gas_limit == 0
+    assert uo.verification_gas_limit == 0
+    assert uo.pre_verification_gas == 0
+    assert uo.max_fee_per_gas == 0
+    assert uo.max_priority_fee_per_gas == 0
+    assert uo.signature == HexBytes(
+        "0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007"
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c"
+    )
+    assert uo.paymaster is None
+    assert uo.paymaster_data == HexBytes("0x")
+    assert uo.paymaster_verification_gas_limit == 0
+    assert uo.paymaster_post_op_gas_limit == 0
+
+
+def test_user_operation_from_dict_roundtrip():
+    uo = aa_bundler.UserOperation(
+        sender=TEST_SENDER,
+        nonce=0xAE85,
+        init_code=HexBytes("0xdead"),
+        call_data=TEST_CALL_DATA,
+        call_gas_limit=50000,
+        verification_gas_limit=60000,
+        pre_verification_gas=70000,
+        max_fee_per_gas=1000000000,
+        max_priority_fee_per_gas=2000000000,
+        signature=HexBytes("0xbeef"),
+        paymaster="0x1111111111111111111111111111111111111111",
+        paymaster_data=HexBytes("0xcafe"),
+        paymaster_verification_gas_limit=80000,
+        paymaster_post_op_gas_limit=90000,
+    )
+    uo2 = aa_bundler.UserOperation.from_dict(uo.as_dict())
+    assert uo2.nonce == uo.nonce
+    assert HexBytes(uo2.sender) == HexBytes(uo.sender)
+    assert HexBytes(uo2.init_code) == HexBytes(uo.init_code)
+    assert HexBytes(uo2.call_data) == HexBytes(uo.call_data)
+    assert uo2.call_gas_limit == uo.call_gas_limit
+    assert uo2.verification_gas_limit == uo.verification_gas_limit
+    assert uo2.pre_verification_gas == uo.pre_verification_gas
+    assert uo2.max_fee_per_gas == uo.max_fee_per_gas
+    assert uo2.max_priority_fee_per_gas == uo.max_priority_fee_per_gas
+    assert HexBytes(uo2.signature) == HexBytes(uo.signature)
+    assert uo2.paymaster == uo.paymaster
+    assert HexBytes(uo2.paymaster_data) == HexBytes(uo.paymaster_data)
+    assert uo2.paymaster_verification_gas_limit == uo.paymaster_verification_gas_limit
+    assert uo2.paymaster_post_op_gas_limit == uo.paymaster_post_op_gas_limit
+
+
+def test_packed_user_operation_from_dict():
+    d = {
+        "sender": HexBytes(TEST_SENDER),
+        "nonce": "0x0",
+        "initCode": "0x",
+        "callData": HexBytes(TEST_CALL_DATA),
+        "accountGasLimits": "0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        "preVerificationGas": "0xf423f",
+        "gasFees": "0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        "paymasterAndData": "0x",
+        "signature": "0x",
+    }
+    packed = aa_bundler.PackedUserOperation.from_dict(d)
+    assert packed.sender == HexBytes(TEST_SENDER)
+    assert packed.nonce == 0
+    assert packed.init_code == HexBytes("0x")
+    assert packed.call_data == HexBytes(TEST_CALL_DATA)
+    assert packed.account_gas_limits == HexBytes(
+        "0x000000000000000000000000000f423f000000000000000000000000000f423f"
+    )
+    assert packed.pre_verification_gas == 999999
+    assert packed.gas_fees == HexBytes("0x0000000000000000000000003b9aca000000000000000000000000003b9aca00")
+    assert packed.paymaster_and_data == HexBytes("0x")
+    assert packed.signature == HexBytes("0x")
+
+
+def test_packed_user_operation_from_dict_roundtrip():
+    packed = aa_bundler.PackedUserOperation(
+        sender=TEST_SENDER,
+        nonce=0,
+        init_code="0x",
+        call_data=TEST_CALL_DATA,
+        account_gas_limits="0x000000000000000000000000000f423f000000000000000000000000000f423f",
+        pre_verification_gas=999999,
+        gas_fees="0x0000000000000000000000003b9aca000000000000000000000000003b9aca00",
+        paymaster_and_data="0x",
+        signature="0x",
+    )
+    packed2 = aa_bundler.PackedUserOperation.from_dict(packed.as_dict())
+    assert packed2.nonce == packed.nonce
+    assert HexBytes(packed2.sender) == HexBytes(packed.sender)
+    assert HexBytes(packed2.init_code) == HexBytes(packed.init_code)
+    assert HexBytes(packed2.call_data) == HexBytes(packed.call_data)
+    assert HexBytes(packed2.account_gas_limits) == HexBytes(packed.account_gas_limits)
+    assert packed2.pre_verification_gas == packed.pre_verification_gas
+    assert HexBytes(packed2.gas_fees) == HexBytes(packed.gas_fees)
+    assert HexBytes(packed2.paymaster_and_data) == HexBytes(packed.paymaster_and_data)
+    assert HexBytes(packed2.signature) == HexBytes(packed.signature)
+
+
 def test_hash_packed_user_operation():
     packed = aa_bundler.PackedUserOperation.from_user_operation(user_operation)
     assert packed.hash() == HexBytes("0xa2c19765d18b0d690c05b20061bd23d066201aff1833a51bd28af115fbd4bcd9")
@@ -213,6 +473,7 @@ def test_send_transaction(w3):
             assert params[0] == {
                 "sender": "0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
                 "nonce": "0x0",
+                "initCode": "0x",
                 "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
                 "paymasterData": "0x01234567",
                 "paymasterPostOpGasLimit": "0x0",
@@ -233,16 +494,16 @@ def test_send_transaction(w3):
         else:
             raise ValueError(f"Unexpected method {method} called")
 
-    bundler = aa_bundler.Bundler(
-        w3,
-        executor_pk=TEST_PRIVATE_KEY,
-        nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
-        fixed_nonce_key=0,
-        bundler_type="alchemy",
-        alchemy_gas_policy_id="01234567-89ab-cdef-0123-456789abcdef",
-    )
+    with patch.object(aa_bundler, "AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", "01234567-89ab-cdef-0123-456789abcdef"):
+        bundler = aa_bundler.Bundler(
+            w3,
+            executor_pk=TEST_PRIVATE_KEY,
+            nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
+            fixed_nonce_key=0,
+            bundler_type="alchemy",
+        )
     make_request_mock = MagicMock(side_effect=make_request)
-    bundler.bundler.provider.make_request = make_request_mock
+    bundler.bundler_w3.provider.make_request = make_request_mock
 
     ret = bundler.send_transaction(tx)
     assert aa_bundler.NONCE_CACHE[0] == 1
@@ -294,16 +555,16 @@ def test_build_user_operation(w3):
         ),
     )
 
-    userop = aa_bundler.Bundler(
-        w3,
-        bundler_url="https://bundler.example.com/rpc",
-        nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
-        fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
-        executor_pk=TEST_PRIVATE_KEY,
-        entrypoint=ENTRYPOINT,
-        bundler_type="alchemy",
-        alchemy_gas_policy_id="d80ed67a-d8bc-4cd1-90ad-b50e0a58c93e",
-    ).build_user_operation(tx)
+    with patch.object(aa_bundler, "AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", "d80ed67a-d8bc-4cd1-90ad-b50e0a58c93e"):
+        userop = aa_bundler.Bundler(
+            w3,
+            bundler_url="https://bundler.example.com/rpc",
+            nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
+            fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
+            executor_pk=TEST_PRIVATE_KEY,
+            entrypoint=ENTRYPOINT,
+            bundler_type="alchemy",
+        ).build_user_operation(tx)
 
     assert userop.as_dict() == {
         "callData": (
@@ -316,7 +577,8 @@ def test_build_user_operation(w3):
             "00000000000000"
         ),
         "callGasLimit": "0xd912",
-        "maxFeePerGas": "0xbaad142eb6",
+        "initCode": "0x",
+        "maxFeePerGas": "0x2e90edd000",
         "maxPriorityFeePerGas": "0x7aef40a00",
         "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324510000000000000000",
         "paymaster": "0x2cc0c7981D846b9F2a16276556f6e8cb52BfB633",
@@ -372,6 +634,7 @@ def test_build_user_operation_execute_user_op(w3):
             "00000000000000000000000000000000000000000000000000000000"  # padding for 32 byte alignment
         ),
         "callGasLimit": "0x10282",
+        "initCode": "0x",
         "maxFeePerGas": "0x1a3df05188",
         "maxPriorityFeePerGas": "0x645849ef5",
         "nonce": "0xae85c374ae0606ed34d0ee009a9ca43a757a8a46a324520000000000000000",
@@ -387,3 +650,311 @@ def test_build_user_operation_execute_user_op(w3):
         ),
         "verificationGasLimit": "0x16471",
     }
+
+
+@aa_bundler.GasEstimationStrategy.register("fixed")
+class FixedGasStrategy(aa_bundler.GasEstimationStrategy):
+    """A strategy with fixed return values, useful for testing Bundler delegation.
+
+    To use, instantiate with a Bundler and set the desired return values:
+        strategy = FixedGasStrategy(bundler)
+        strategy.estimation = UserOpEstimation(...)
+        strategy.gas_price = GasPrice(...)
+        strategy.paymaster = PaymasterAndData(...) or None
+        bundler.gas_strategy = strategy
+        user_op = bundler.build_user_operation(tx)
+    """
+
+    def __init__(self, bundler, **kwargs):
+        super().__init__(bundler, **kwargs)
+        self.estimation = aa_bundler.UserOpEstimation(0, 0, 0, 0)
+        self.gas_price = aa_bundler.GasPrice(0, 0)
+        self.paymaster = None
+
+    def estimate_gas_limits(self, user_operation):
+        return self.estimation
+
+    def estimate_gas_price(self, user_operation):
+        return self.gas_price
+
+    def estimate_paymaster(self, user_operation):
+        return self.paymaster
+
+
+def _make_mock_bundler(w3=None):
+    """Create a mocked Bundler-like object with default config values."""
+    from unittest.mock import MagicMock
+
+    if w3 is None:
+        w3 = MagicMock()
+
+    mock = MagicMock()
+    mock.w3 = w3
+    mock.bundler_w3 = MagicMock()
+    mock.bundler_w3.provider = MagicMock()
+    mock.entrypoint = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+    mock.overrides = {}
+    mock.verification_gas_factor = 1.0
+    mock.gas_limit_factor = 1.0
+    mock.priority_gas_price_factor = 1.0
+    mock.base_gas_price_factor = 1.0
+    mock.max_fee_per_gas = 200000000000
+    return mock
+
+
+def test_generic_gas_strategy():
+    mock_bundler = _make_mock_bundler()
+    strategy = aa_bundler.GenericGasStrategy(mock_bundler)
+
+    estimation = aa_bundler.UserOpEstimation(
+        pre_verification_gas=1000,
+        verification_gas_limit=2000,
+        call_gas_limit=3000,
+        paymaster_verification_gas_limit=0,
+    )
+    with patch.object(strategy, "_estimate_user_operation_gas", return_value=estimation):
+        result = strategy.estimate_gas_limits(MagicMock())
+        assert result == estimation
+
+    with patch.object(strategy, "_get_base_fee", return_value=50_000_000_000):
+        mock_bundler.w3.eth.max_priority_fee = 1_000_000_000
+        gas_price = strategy.estimate_gas_price(MagicMock())
+        assert gas_price.max_priority_fee_per_gas == 1_000_000_000
+        assert gas_price.max_fee_per_gas == 51_000_000_000
+        assert strategy.estimate_paymaster(MagicMock()) is None
+
+
+def test_pimlico_gas_strategy():
+    mock_bundler = _make_mock_bundler()
+    strategy = aa_bundler.PimlicoGasStrategy(mock_bundler)
+
+    estimation = aa_bundler.UserOpEstimation(100, 200, 300, 0)
+    with patch.object(strategy, "_estimate_user_operation_gas", return_value=estimation):
+        result = strategy.estimate_gas_limits(MagicMock())
+        assert result == estimation
+
+    mock_bundler.bundler_w3.provider.make_request.return_value = {
+        "result": {
+            "standard": {
+                "maxPriorityFeePerGas": "0x3b9aca00",  # 1 gwei
+                "maxFeePerGas": "0x77359400",  # 2 gwei
+            }
+        }
+    }
+    gas_price = strategy.estimate_gas_price(MagicMock())
+    assert gas_price.max_priority_fee_per_gas == 1_000_000_000
+    assert strategy.estimate_paymaster(MagicMock()) is None
+
+
+def test_alchemy_gas_strategy():
+    with patch.object(aa_bundler, "AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", "test-policy-id"):
+        mock_bundler = _make_mock_bundler()
+        strategy = aa_bundler.AlchemyGasStrategy(mock_bundler)
+
+        mock_result = {
+            "preVerificationGas": "0x1000",
+            "verificationGasLimit": "0x2000",
+            "callGasLimit": "0x3000",
+            "paymasterVerificationGasLimit": "0x4000",
+            "paymasterPostOpGasLimit": "0x5000",
+            "maxPriorityFeePerGas": "0x3b9aca00",
+            "maxFeePerGas": "0x77359400",
+            "paymaster": "0x1234567890123456789012345678901234567890",
+            "paymasterData": "0xdeadbeef",
+        }
+        mock_bundler.bundler_w3.provider.make_request.return_value = {"result": mock_result}
+
+        uo = MagicMock()
+        uo.as_reduced_dict.return_value = {}
+
+        limits = strategy.estimate_gas_limits(uo)
+        assert limits.pre_verification_gas == 0x1000
+        assert limits.verification_gas_limit == 0x2000
+        assert limits.call_gas_limit == 0x3000
+
+        price = strategy.estimate_gas_price(uo)
+        assert price.max_priority_fee_per_gas == 0x3B9ACA00
+        assert price.max_fee_per_gas == 0x77359400
+
+        pm = strategy.estimate_paymaster(uo)
+        assert pm.paymaster == "0x1234567890123456789012345678901234567890"
+
+        assert mock_bundler.bundler_w3.provider.make_request.call_count == 1
+
+        strategy.estimate_gas_limits(uo)
+        assert mock_bundler.bundler_w3.provider.make_request.call_count == 1
+
+
+def test_alchemy_gas_strategy_no_policy_id():
+    with patch.object(aa_bundler, "AA_BUNDLER_ALCHEMY_GAS_POLICY_ID", None):
+        with pytest.raises(aa_bundler.BundlerError, match="Must provide alchemy_gas_policy_id"):
+            aa_bundler.AlchemyGasStrategy(_make_mock_bundler())
+
+
+def test_zeroprice_gas_strategy():
+    mock_bundler = _make_mock_bundler()
+    strategy = aa_bundler.ZeroPriceGasStrategy(mock_bundler)
+
+    estimation = aa_bundler.UserOpEstimation(100, 200, 300, 0)
+    with patch.object(strategy, "_estimate_user_operation_gas", return_value=estimation):
+        result = strategy.estimate_gas_limits(MagicMock())
+        assert result == estimation
+
+    gas_price = strategy.estimate_gas_price(MagicMock())
+    assert gas_price.max_priority_fee_per_gas == 0
+    assert gas_price.max_fee_per_gas == 0
+
+    assert strategy.estimate_paymaster(MagicMock()) is None
+
+
+def test_unknown_strategy_type():
+    with pytest.raises(aa_bundler.BundlerError, match="Unknown bundler_type"):
+        aa_bundler.Bundler(MagicMock(), bundler_type="nonexistent")
+
+
+def _run_fixed_strategy_test(
+    tx_kwargs,
+    max_fee_per_gas=200000000000,
+    estimation_data=None,
+    gas_price_data=None,
+    paymaster_data=None,
+    enable_cap=True,
+):
+    w3 = MagicMock()
+    w3.eth.chain_id = 137
+
+    tx = aa_bundler.Tx(**tx_kwargs)
+
+    bundler = aa_bundler.Bundler(
+        w3,
+        nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
+        fixed_nonce_key=0,
+        max_fee_per_gas=max_fee_per_gas,
+    )
+
+    strategy = FixedGasStrategy(bundler)
+    if estimation_data:
+        strategy.estimation = aa_bundler.UserOpEstimation(**estimation_data)
+    if gas_price_data:
+        strategy.gas_price = aa_bundler.GasPrice(**gas_price_data)
+    if paymaster_data:
+        strategy.paymaster = aa_bundler.PaymasterAndData(**paymaster_data)
+    bundler.gas_strategy = strategy
+
+    user_op = bundler.build_user_operation(tx, enable_cap=enable_cap)
+    return user_op, strategy
+
+
+TX_KWARGS = dict(
+    value=0,
+    target="0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    data=HexBytes("0xdeadbeef"),
+    from_="0xE8B412158c205B0F605e0FC09dCdA27d3F140FE9",
+    chain_id=137,
+)
+
+
+def test_bundler_with_fixed_strategy():
+    user_op, strategy = _run_fixed_strategy_test(
+        TX_KWARGS,
+        estimation_data=dict(
+            pre_verification_gas=100,
+            verification_gas_limit=200,
+            call_gas_limit=300,
+            paymaster_verification_gas_limit=0,
+        ),
+        gas_price_data=dict(max_priority_fee_per_gas=1, max_fee_per_gas=2),
+        paymaster_data=dict(
+            paymaster="0x1111111111111111111111111111111111111111",
+            paymaster_data=HexBytes("0xaa"),
+            paymaster_verification_gas_limit=10,
+            paymaster_post_op_gas_limit=20,
+        ),
+    )
+
+    assert user_op.call_gas_limit == 300
+    assert user_op.verification_gas_limit == 200
+    assert user_op.pre_verification_gas == 100
+    assert user_op.max_priority_fee_per_gas == 1
+    assert user_op.max_fee_per_gas == 2
+    assert user_op.paymaster == "0x1111111111111111111111111111111111111111"
+
+
+def test_fixed_strategy_cap_applied():
+    user_op_capped, strategy = _run_fixed_strategy_test(
+        TX_KWARGS,
+        max_fee_per_gas=100,
+        estimation_data=dict(
+            pre_verification_gas=0,
+            verification_gas_limit=0,
+            call_gas_limit=0,
+            paymaster_verification_gas_limit=0,
+        ),
+        gas_price_data=dict(max_priority_fee_per_gas=10, max_fee_per_gas=500),
+        enable_cap=True,
+    )
+    assert user_op_capped.max_fee_per_gas == 100
+    assert user_op_capped.max_priority_fee_per_gas == 10
+
+    user_op_uncapped, _ = _run_fixed_strategy_test(
+        TX_KWARGS,
+        max_fee_per_gas=100,
+        estimation_data=dict(
+            pre_verification_gas=0,
+            verification_gas_limit=0,
+            call_gas_limit=0,
+            paymaster_verification_gas_limit=0,
+        ),
+        gas_price_data=dict(max_priority_fee_per_gas=10, max_fee_per_gas=500),
+        enable_cap=False,
+    )
+    assert user_op_uncapped.max_fee_per_gas == 500
+    assert user_op_uncapped.max_priority_fee_per_gas == 10
+
+
+def test_fixed_strategy_no_paymaster():
+    user_op, _ = _run_fixed_strategy_test(
+        TX_KWARGS,
+        estimation_data=dict(
+            pre_verification_gas=100,
+            verification_gas_limit=200,
+            call_gas_limit=300,
+            paymaster_verification_gas_limit=0,
+        ),
+        gas_price_data=dict(max_priority_fee_per_gas=1, max_fee_per_gas=2),
+    )
+    assert user_op.paymaster is None
+    assert user_op.paymaster_data == HexBytes("0x")
+    assert user_op.paymaster_verification_gas_limit == 0
+    assert user_op.paymaster_post_op_gas_limit == 0
+
+
+def test_aa_bundler_async_transaction():
+    from ethproto.w3wrappers import transact
+
+    w3 = MagicMock()
+    w3.eth.chain_id = 137
+
+    with patch("ethproto.w3wrappers.W3_TRANSACT_MODE", "aa-bundler-async"):
+        with patch("ethproto.aa_bundler.Bundler") as MockBundler:
+            mock_bundler_instance = MockBundler.return_value
+            mock_bundler_instance.send_transaction.return_value = {"userOpHash": "0xabc123"}
+
+            provider = MagicMock()
+            provider.w3 = w3
+            provider.tx_kwargs = {}
+
+            function = MagicMock()
+            function.build_transaction.return_value = {
+                "to": "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+                "data": "0xdeadbeef",
+                "value": 0,
+                "gas": 0,
+                "gasPrice": 0,
+            }
+
+            result = transact(provider, function, {})
+
+            assert result == {"userOpHash": "0xabc123"}
+            MockBundler.assert_called_once_with(w3)
+            mock_bundler_instance.send_transaction.assert_called_once()
