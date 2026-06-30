@@ -500,7 +500,7 @@ def test_send_transaction(w3):
             executor_pk=TEST_PRIVATE_KEY,
             nonce_mode=aa_bundler.NonceMode.FIXED_KEY_LOCAL_NONCE,
             fixed_nonce_key=0,
-            bundler_type="alchemy",
+            bundler_estimation="alchemy",
         )
     make_request_mock = MagicMock(side_effect=make_request)
     bundler.bundler_w3.provider.make_request = make_request_mock
@@ -563,7 +563,7 @@ def test_build_user_operation(w3):
             fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32451,
             executor_pk=TEST_PRIVATE_KEY,
             entrypoint=ENTRYPOINT,
-            bundler_type="alchemy",
+            bundler_estimation="alchemy",
         ).build_user_operation(tx)
 
     assert userop.as_dict() == {
@@ -615,7 +615,7 @@ def test_build_user_operation_execute_user_op(w3):
         fixed_nonce_key=0xAE85C374AE0606ED34D0EE009A9CA43A757A8A46A32452,
         executor_pk=TEST_PRIVATE_KEY,
         entrypoint=ENTRYPOINT,
-        bundler_type="generic",
+        bundler_estimation="generic",
         use_execute_user_op=True,
     ).build_user_operation(tx)
 
@@ -721,7 +721,38 @@ def test_generic_gas_strategy():
         gas_price = strategy.estimate_gas_price(MagicMock())
         assert gas_price.max_priority_fee_per_gas == 1_000_000_000
         assert gas_price.max_fee_per_gas == 51_000_000_000
-        assert strategy.estimate_paymaster(MagicMock()) is None
+    assert strategy.estimate_paymaster(MagicMock()) is None
+
+
+def test_fixed_call_gas_limit_strategy_defaults():
+    mock_bundler = _make_mock_bundler()
+    strategy = aa_bundler.FixedCallGasLimitStrategy(mock_bundler)
+
+    estimation = strategy.estimate_gas_limits(MagicMock())
+    assert estimation.call_gas_limit == 16_000_000
+    assert estimation.verification_gas_limit == 0
+    assert estimation.pre_verification_gas == 0
+
+    gas_price = strategy.estimate_gas_price(MagicMock())
+    assert gas_price.max_priority_fee_per_gas == 0
+    assert gas_price.max_fee_per_gas == 0
+
+    assert strategy.estimate_paymaster(MagicMock()) is None
+
+
+def test_fixed_call_gas_limit_strategy_custom():
+    mock_bundler = _make_mock_bundler()
+    strategy = aa_bundler.FixedCallGasLimitStrategy(
+        mock_bundler,
+        call_gas_limit=5_000_000,
+        verification_gas_limit=100_000,
+        pre_verification_gas=50_000,
+    )
+
+    estimation = strategy.estimate_gas_limits(MagicMock())
+    assert estimation.call_gas_limit == 5_000_000
+    assert estimation.verification_gas_limit == 100_000
+    assert estimation.pre_verification_gas == 50_000
 
 
 def test_pimlico_gas_strategy():
@@ -808,8 +839,8 @@ def test_zeroprice_gas_strategy():
 
 
 def test_unknown_strategy_type():
-    with pytest.raises(aa_bundler.BundlerError, match="Unknown bundler_type"):
-        aa_bundler.Bundler(MagicMock(), bundler_type="nonexistent")
+    with pytest.raises(aa_bundler.BundlerError, match="Unknown bundler_estimation"):
+        aa_bundler.Bundler(MagicMock(), bundler_estimation="nonexistent")
 
 
 def _run_fixed_strategy_test(

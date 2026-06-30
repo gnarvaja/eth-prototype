@@ -45,6 +45,7 @@ AA_BUNDLER_VERIFICATION_GAS_FACTOR = env.float("AA_BUNDLER_VERIFICATION_GAS_FACT
 AA_BUNDLER_MAX_FEE_PER_GAS = env.int("AA_BUNDLER_MAX_FEE_PER_GAS", 200000000000)  # 200 gwei
 
 AA_BUNDLER_STATE_OVERRIDES = env.json("AA_BUNDLER_STATE_OVERRIDES", default={})
+AA_BUNDLER_ESTIMATION_KWARGS = env.json("AA_BUNDLER_ESTIMATION_KWARGS", {})
 
 NonceMode = Enum(
     "NonceMode",
@@ -114,7 +115,7 @@ class Bundler:
         self,
         w3: Web3,
         bundler_url: str = AA_BUNDLER_URL,
-        bundler_type: str = AA_BUNDLER_PROVIDER,
+        bundler_estimation: str = AA_BUNDLER_PROVIDER,
         entrypoint: HexAddress = AA_BUNDLER_ENTRYPOINT,
         nonce_mode: NonceMode = AA_BUNDLER_NONCE_MODE,
         fixed_nonce_key: int = AA_BUNDLER_NONCE_KEY,
@@ -126,10 +127,11 @@ class Bundler:
         executor_pk: HexBytes = AA_BUNDLER_EXECUTOR_PK,
         overrides: StateOverride = AA_BUNDLER_STATE_OVERRIDES,
         use_execute_user_op: bool = AA_BUNDLER_USE_EXECUTE_USER_OP,
+        bundler_estimation_kwargs: Optional[dict] = None,
     ):
         self.w3 = w3
         self.bundler_w3 = Web3(Web3.HTTPProvider(bundler_url), middleware=[]) if bundler_url else w3
-        self.bundler_type = bundler_type
+        self.bundler_estimation = bundler_estimation
         self.entrypoint = entrypoint
         self.nonce_mode = nonce_mode
         self.fixed_nonce_key = fixed_nonce_key
@@ -145,14 +147,16 @@ class Bundler:
         self.overrides = overrides
         self.use_execute_user_op = use_execute_user_op
 
-        strategy_class = GasEstimationStrategy._strategies.get(bundler_type)
+        strategy_class = GasEstimationStrategy._strategies.get(bundler_estimation)
         if strategy_class is None:
-            raise BundlerError(f"Unknown bundler_type: {bundler_type}")
-        self.gas_strategy = strategy_class(self)
+            raise BundlerError(f"Unknown bundler_estimation: {bundler_estimation}")
+        self.gas_strategy = strategy_class(
+            self, **(bundler_estimation_kwargs or AA_BUNDLER_ESTIMATION_KWARGS)
+        )
 
     def __str__(self):
         return (
-            f"Bundler(type={self.bundler_type}, entrypoint={self.entrypoint}, nonce_mode={self.nonce_mode}, "
+            f"Bundler(type={self.bundler_estimation}, entrypoint={self.entrypoint}, nonce_mode={self.nonce_mode}, "
             f"fixed_nonce_key={self.fixed_nonce_key}, verification_gas_factor={self.verification_gas_factor}, "
             f"gas_limit_factor={self.gas_limit_factor}, priority_gas_price_factor={self.priority_gas_price_factor}, "
             f"base_gas_price_factor={self.base_gas_price_factor}, max_fee_per_gas={self.max_fee_per_gas}), "
@@ -339,7 +343,7 @@ class AlchemyGasStrategy(GasEstimationStrategy):
         super().__init__(bundler)
         gas_policy_id = kwargs.pop("gas_policy_id", AA_BUNDLER_ALCHEMY_GAS_POLICY_ID)
         if gas_policy_id is None:
-            raise BundlerError("Must provide alchemy_gas_policy_id when using alchemy bundler_type")
+            raise BundlerError("Must provide alchemy_gas_policy_id when using alchemy bundler_estimation")
         self._gas_policy_id = gas_policy_id
         self._cached_result: Optional[AlchemyGasAndPaymasterAndData] = None
 
@@ -427,6 +431,30 @@ class AlchemyGasStrategy(GasEstimationStrategy):
 class ZeroPriceGasStrategy(GasEstimationStrategy):
     def estimate_gas_limits(self, user_operation: UserOperation) -> UserOpEstimation:
         return self._estimate_user_operation_gas(user_operation)
+
+    def estimate_gas_price(self, user_operation: UserOperation) -> GasPrice:
+        return GasPrice(max_priority_fee_per_gas=0, max_fee_per_gas=0)
+
+
+@GasEstimationStrategy.register("fixed-cgl")
+class FixedCallGasLimitStrategy(GasEstimationStrategy):
+    """Stamps a fixed callGasLimit and zeroes the rest. No RPC estimation."""
+
+    def __init__(
+        self, bundler, call_gas_limit=16_000_000, verification_gas_limit=0, pre_verification_gas=0, **kwargs
+    ):
+        super().__init__(bundler, **kwargs)
+        self.call_gas_limit = call_gas_limit
+        self.verification_gas_limit = verification_gas_limit
+        self.pre_verification_gas = pre_verification_gas
+
+    def estimate_gas_limits(self, user_operation: UserOperation) -> UserOpEstimation:
+        return UserOpEstimation(
+            call_gas_limit=self.call_gas_limit,
+            verification_gas_limit=self.verification_gas_limit,
+            pre_verification_gas=self.pre_verification_gas,
+            paymaster_verification_gas_limit=0,
+        )
 
     def estimate_gas_price(self, user_operation: UserOperation) -> GasPrice:
         return GasPrice(max_priority_fee_per_gas=0, max_fee_per_gas=0)
