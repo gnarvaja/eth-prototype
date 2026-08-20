@@ -219,11 +219,9 @@ def test_get_etherscan_url_v2_format(provider_with_etherscan_env):
 def test_get_first_block_makes_request(provider_with_etherscan_env):
     provider = provider_with_etherscan_env
     address = "0x8e3aab1fc53e8b0f5d987c20b1899a2db3b2f95c"
-    chainid = provider.w3.eth.chain_id
     responses.get(
-        f"https://api.etherscan.io/v2/api?apikey=abc123&chainid={chainid}&"
-        f"&module=account&action=txlist&address={address}&startblock=0&"
-        "endblock=99999999&page=1&offset=10&sort=asc",
+        provider.get_etherscan_url()
+        + f"module=contract&action=getcontractcreation&contractaddresses={address}",
         json={"status": "1", "message": "OK", "result": [{"blockNumber": "1"}]},
         status=200,
     )

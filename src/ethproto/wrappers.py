@@ -280,11 +280,7 @@ class BaseProvider(ABC):
         if not etherscan_url:
             return 0
         address = self.get_contract_address(eth_wrapper)
-        url = (
-            etherscan_url
-            + f"module=account&action=txlist&address={address}&startblock=0&"
-            + "endblock=99999999&page=1&offset=10&sort=asc"
-        )
+        url = etherscan_url + f"module=contract&action=getcontractcreation&contractaddresses={address}"
         resp = requests.get(url)
         resp.raise_for_status()
         resp = resp.json()
